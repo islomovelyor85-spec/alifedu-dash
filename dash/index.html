@@ -267,7 +267,7 @@ function overview() {
       ${kpi('Reklama xarajati', adMoney(spend), `Meta · ${num(metaLeads)} natija (Results)`, 'amber')}
       ${kpi('Lead narxi', adMoney(div(spend, paid.leads)), `Target: ${num(paid.leads)} lead Bitrix'da`, 'blue')}
       ${kpi('CPQL', adMoney(div(spend, paid.qual)), `sifatli lead narxi · ${num(paid.qual)} ta`, 'teal')}
-      ${kpi('Sotuv narxi', adMoney(div(spend, wonTarget.n)), `${adMoney(spend, false)} ÷ ${num(wonTarget.n)} ta sotuv (Target leadlaridan, shu davrda «To'lov qildi» / «Nabor guruh» / «Успешна»ga o'tgan)`, 'green')}
+      ${kpi('Sotuv narxi', adMoney(div(spend, won.n)), `${adMoney(spend, false)} ÷ ${num(won.n)} ta sotuv (shu davrda «To'lov qildi» / «Nabor guruh» / «Успешна»ga o'tgan, barcha manbalar)`, 'green')}
       ${kpi('ROMI', pct(romi), fx ? `tushum ${moneyShortTop(wonTarget.sum)} so'm · kurs ${num(fx)}` : 'kurs yo\'q', 'violet')}
     </div>` : '';
   const days = Math.round((new Date(S.to) - new Date(S.from)) / 864e5) + 1;
@@ -1091,7 +1091,7 @@ const GUIDE = [
     ['Meta natija (Results)', "Ads Manager'dagi «Results» ustuni: kampaniya maqsadi bo'yicha natija (lid, xabar va h.k.). Meta bermagan kunlarda lid soni olinadi."], ['Natija narxi (Meta)', "Xarajat ÷ Meta natijalari (Ads Manager'dagi «Cost per result»)."], ['Lead narxi', "Xarajat ÷ Bitrix'ga «Target» bo'lib tushgan leadlar."],
     ['Meta → Bitrix yetib borish', "Bitrix Target leadlari ÷ Meta natijalari. 100% dan past — formadan Bitrix'ga tushmagan yoki dublikat bo'lib birlashgan lidlar."],
     ['CPQL (sifatli lid narxi)', "Xarajat ÷ Target'dan sifatli leadlar."],
-    ['Sotuv narxi', "Xarajat ÷ shu davrda yopilgan, Target leadidan chiqqan sotuvlar soni. Masalan $9 122 ÷ 39 = $234. Bu oydagi sotuvlarning bir qismi o'tgan oy leadlaridan, shu oy leadlarining bir qismi esa keyingi oyda sotiladi — shuning uchun oy o'rtasida bu raqam yuqori ko'rinadi."],
+    ['Sotuv narxi', "«Umumiy» sahifasida: reklama xarajati ÷ shu davrdagi barcha sotuvlar («Sotuv» kartochkasidagi son: «To'lov qildi», «Nabor guruh», «Сделка успешна»ga o'tgan deallar). Kreativlar va filiallarda — faqat shu reklama/filialning Target sotuvlari bo'yicha."],
     ['ROMI', "(Target sotuvlari tushumi − xarajat so'mda) ÷ xarajat so'mda."],
   ]],
   ["Aloqa tezligi (1-qo'ng'iroq)", [
