@@ -1,9 +1,13 @@
 // Telegram reports for the sales audit (separate bot: env TG_BOT_TOKEN, chat TG_CHAT_ID or auto-detected).
 //   POST /audit-report?mode=daily    07:00 Tashkent: yesterday's leads, problems vs the previous 7 days
 //   POST /audit-report?mode=status   every 4 hours: today so far, untouched leads, spend
+//   POST /audit-report?mode=setup    once: point the bot's webhook here and show the period buttons
+//   Telegram webhook (?mode=webhook)  buttons «7 kun», «10 kun», «1 oy»: report for that many days up to today
 // Each run sends Target (with ad spend), Звонок, and one message with every other source.
 import { Any, authorized, json, sb } from "../_shared/sync.ts";
 import { KNOWLEDGE } from "./knowledge.ts";
+
+declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
 const TOKEN = Deno.env.get("TG_BOT_TOKEN") ?? "";
 const tg = (method: string, body: Any) =>
@@ -198,22 +202,107 @@ async function status(): Promise<Report[]> {
   return [one(TARGET, true), one(CALL, false), others(rows, `📋 <b>Boshqa manbalar — bugun ${hh}:00 gacha</b>`)];
 }
 
+// Buttons under the chat: a report for the last N days (today included), compared with the N days before.
+const PERIODS: Record<string, number> = { "📊 7 kun": 7, "📊 10 kun": 10, "📊 1 oy": 30 };
+const KEYBOARD = { keyboard: [Object.keys(PERIODS).map((text) => ({ text }))], resize_keyboard: true, is_persistent: true };
+const change = (a: number, b: number) => (b ? `${a >= b ? "▲" : "▼"} ${Math.abs((a - b) / b * 100).toFixed(0)}%` : "");
+
+async function period(days: number): Promise<Report[]> {
+  const to = iso(tashkent()), from = addDays(to, -(days - 1)), p1 = addDays(from, -1), p0 = addDays(from, -days);
+  const [rows, prevRows, sp, spPrev, wonRes, wonPrevRes, cfgRes] = await Promise.all([reportRows(from, to), reportRows(p0, p1), spendOf(from, to), spendOf(p0, p1),
+    sb.from("v_won_daily").select("source,won,stage").gte("day", from).lte("day", to).limit(5000),
+    sb.from("v_won_daily").select("source,won").gte("day", p0).lte("day", p1).limit(5000),
+    sb.from("audit_settings").select("ad_currency").eq("id", 1).single()]);
+  const usd = (n: number) => (cfgRes.data?.ad_currency === "USD" ? "$" : "") + (n >= 100 ? num(n) : (n || 0).toFixed(2));
+  const won = wonRes.data ?? [], wonPrev = wonPrevRes.data ?? [];
+  const range = `${human(from)} — ${human(to)}`;
+  const one = (src: string, withAds: boolean): Report => {
+    const cur = stats(rows.filter((r: Any) => r.source === src)), prev = stats(prevRows.filter((r: Any) => r.source === src));
+    // Sales closed in the period (To'lov qildi / Nabor guruh / Сделка успешна), whatever month the lead came.
+    const sales = won.filter((r: Any) => r.source === src), salesN = sumRows(sales, "won"), salesPrev = sumRows(wonPrev.filter((r: Any) => r.source === src), "won");
+    const byStage: Record<string, number> = {};
+    for (const r of sales) byStage[r.stage] = (byStage[r.stage] ?? 0) + +r.won;
+    const line = (label: string, a: number, b: number, bold = false) => `${label}: ${bold ? `<b>${num(a)}</b>` : num(a)} ${a || b ? `(oldingi ${days} kun ${num(b)} ${change(a, b)})` : ""}`.trim();
+    const ads = withAds && sp.spend ? [
+      `💰 Reklama: ${usd(sp.spend)} (oldingi ${usd(spPrev.spend)} ${change(sp.spend, spPrev.spend)})`,
+      `Meta natija: ${num(sp.metaLeads)} · natija narxi ${usd(sp.spend / Math.max(1, sp.metaLeads))}`,
+      `Lead narxi (Bitrix): ${usd(sp.spend / Math.max(1, cur.leads))} · CPQL: ${usd(sp.spend / Math.max(1, cur.qual))}` +
+        (prev.qual && spPrev.spend ? ` (oldin ${usd(spPrev.spend / prev.qual)})` : ""),
+      salesN ? `Sotuv narxi: ${usd(sp.spend / salesN)}` : "",
+    ].filter(Boolean).join("\n") : "";
+    return {
+      chart: cur.leads ? { byStatus: cur.byStatus, title: `${src} · ${range} — ${num(cur.leads)} ta lead` } : undefined,
+      text: [
+        `📅 <b>${esc(src)} — ${days} kun</b> (${range})`,
+        ``,
+        line("Leadlar", cur.leads, prev.leads, true),
+        `Aloqa qilindi: ${num(cur.contacted)} · ${pct(cur.contacted, cur.leads)}`,
+        `Sifatli: <b>${num(cur.qual)}</b> · ${pct(cur.qual, cur.leads)} (oldin ${pct(prev.qual, prev.leads)})`,
+        `Sifatsiz yopildi: ${num(cur.junk)} · ${pct(cur.junk, cur.leads)} (oldin ${pct(prev.junk, prev.leads)})`,
+        `Jarayonda: ${num(cur.in_progress)} · ishlov berilmagan: <b>${num(cur.untouched)}</b>`,
+        line("🎯 Sotuv (shu davrda yopilgan)", salesN, salesPrev, true) + (Object.keys(byStage).length ? "\n  " + Object.entries(byStage).map(([k, v]) => `${esc(k)}: ${num(v)}`).join(" · ") : ""),
+        ads,
+        cur.leads ? "\n" + statusBlock(cur.byStatus, cur.leads) + "\n" : "",
+        opsLine(cur.opBy),
+      ].filter((x) => x !== "").join("\n"),
+    };
+  };
+  return [one(TARGET, true), one(CALL, false), others(rows, `📋 <b>Boshqa manbalar — ${days} kun</b> (${range})`)];
+}
+
+async function send(chat: string, reports: Report[]) {
+  const sent: Any[] = [];
+  for (const r of reports) {
+    const photo = r.chart ? await chartUrl(r.chart.byStatus, r.chart.title) : null;
+    if (photo) await tg("sendPhoto", { chat_id: chat, photo });
+    const res = await tg("sendMessage", { chat_id: chat, text: r.text, parse_mode: "HTML", disable_web_page_preview: true, reply_markup: KEYBOARD });
+    sent.push({ ok: res.ok, chart: !!photo, error: res.description });
+  }
+  return sent;
+}
+
+// Telegram signs webhook calls with this secret (derived from the bot token, so nothing extra to store).
+async function hookSecret() {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("audit-hook:" + TOKEN));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 48);
+}
+
+// Only the report chat may ask for reports; anyone else gets no answer.
+async function onUpdate(update: Any) {
+  const msg = update.message, chat = await chatId();
+  if (!msg || !chat || String(msg.chat?.id) !== String(chat)) return;
+  const days = PERIODS[String(msg.text ?? "").trim()];
+  if (!days) {
+    await tg("sendMessage", { chat_id: chat, text: "Qaysi davr bo'yicha hisobot kerak? Pastdagi tugmani bosing.", reply_markup: KEYBOARD });
+    return;
+  }
+  await tg("sendMessage", { chat_id: chat, text: `⏳ ${days} kunlik hisobot tayyorlanmoqda…` });
+  await send(chat, await period(days)).catch((e) => tg("sendMessage", { chat_id: chat, text: `Hisobotni tayyorlab bo'lmadi: ${String(e).slice(0, 200)}` }));
+}
+
 Deno.serve(async (req) => {
+  // Telegram webhook: answer at once, build the report in the background.
+  if (req.headers.get("x-telegram-bot-api-secret-token")) {
+    if (req.headers.get("x-telegram-bot-api-secret-token") !== await hookSecret()) return json({ error: "forbidden" }, 403);
+    const update = await req.json().catch(() => ({}));
+    EdgeRuntime.waitUntil(onUpdate(update).catch(() => {}));
+    return json({ ok: true });
+  }
   if (!authorized(req)) return json({ error: "forbidden" }, 403);
   if (!TOKEN) return json({ error: "TG_BOT_TOKEN is not set" }, 400);
   try {
     const chat = await chatId();
     if (!chat) return json({ error: "no chat: send /start to the bot or set TG_CHAT_ID" }, 400);
-    const mode = new URL(req.url).searchParams.get("mode") ?? "status";
+    const params = new URL(req.url).searchParams, mode = params.get("mode") ?? "status";
+    if (mode === "setup") {
+      const hook = await tg("setWebhook", { url: `${Deno.env.get("SUPABASE_URL")}/functions/v1/audit-report?mode=webhook`, secret_token: await hookSecret(), allowed_updates: ["message"] });
+      const hello = await tg("sendMessage", { chat_id: chat, text: "Endi pastdagi tugmalar bilan istalgan payt hisobot olishingiz mumkin: 7 kun, 10 kun yoki 1 oy (bugun ham kiradi, oldingi shuncha kun bilan solishtiriladi).", reply_markup: KEYBOARD });
+      return json({ ok: hook.ok && hello.ok, webhook: hook.description, message: hello.description });
+    }
+    if (mode === "period") return json({ ok: true, sent: await send(chat, await period(+(params.get("days") ?? 7) || 7)) });
     const reports = mode === "daily" ? await daily() : await status();
     // Each report: chart first (photo), then its text.
-    const sent: Any[] = [];
-    for (const r of reports) {
-      const photo = r.chart ? await chartUrl(r.chart.byStatus, r.chart.title) : null;
-      if (photo) await tg("sendPhoto", { chat_id: chat, photo });
-      const res = await tg("sendMessage", { chat_id: chat, text: r.text, parse_mode: "HTML", disable_web_page_preview: true });
-      sent.push({ ok: res.ok, chart: !!photo, error: res.description });
-    }
+    const sent = await send(chat, reports);
     const plan = mode === "daily" && scenarioInput ? await scenarios(scenarioInput) : null;
     if (plan) await tg("sendMessage", { chat_id: chat, text: `🧭 <b>Taklif etilgan ssenariylar (Target)</b>\n\n${esc(plan)}`, parse_mode: "HTML" });
     return json({ ok: sent.every((x) => x.ok), mode, sent, scenarios: !!plan, scenarioError: plan ? undefined : scenarioError });
