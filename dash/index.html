@@ -466,7 +466,7 @@ const STEP_INFO = {
   qual: "Status «Качественный лид»",
   deals: "Leaddan sdelka ochilgan",
   came_to_branch: "Sdelka «Filialga keldi» yoki undan keyingi bosqichda",
-  won: "Sdelka hozir «To'lov qildi», «Nabor guruh» yoki «Сделка успешна»da",
+  won: "Shu davr leadlaridan sotuvga aylanganlar (sdelka hozir «To'lov qildi», «Nabor guruh» yoki «Сделка успешна»da)",
 };
 function sumBy(rows, keyFn) {
   const by = {};
@@ -479,6 +479,13 @@ function sumBy(rows, keyFn) {
   return Object.values(by);
 }
 const stepCell = (o, i) => { const v = o[STEPS[i][0]], prev = i ? o[STEPS[i - 1][0]] : null; return `${num(v)}${i ? `<div class="text-[10px] text-muted">${pct(div(v, prev))}</div>` : ''}`; };
+// Why the funnel's Sotuv differs from the «Umumiy» Sotuv card: the funnel follows this period's leads,
+// the card counts every deal that became a sale in this period, whenever its lead came in.
+function wonGap(cohort) {
+  const all = bySource(S.data.wonDaily).reduce((a, r) => a + +r.won, 0), older = all - cohort;
+  if (older <= 0) return '';
+  return `<div class="mt-4 p-3 rounded-xl bg-surface2 text-[13px] leading-relaxed"><i class="ph-bold ph-info text-muted"></i> Voronkadagi <b>${num(cohort)} ta sotuv</b> — faqat shu davrda kelgan leadlardan. «Umumiy»dagi <b>Sotuv ${num(all)}</b> esa shu davrda sotuvga o'tgan barcha deallar: ulardan <b>${num(older)} tasi</b> oldinroq (o'tgan oylarda) kelgan leadlar, ular bu voronkaga kirmaydi.</div>`;
+}
 function funnel() {
   const rows = S.data.sales.filter(match);
   const [t] = sumBy(rows, () => 'all');
@@ -501,7 +508,7 @@ function funnel() {
     { t: "Deal yo'qotildi", r: 1, f: o => num(o.deal_lost) }, { t: 'Deal→sotuv', r: 1, s: o => div(o.won, o.deals) ?? -1, f: o => pct(div(o.won, o.deals)) }, { t: 'Tushum', r: 1, f: o => money(o.revenue) }];
   const byBranch = sumBy(rows.filter(r => r.deal_manager_id), r => r.deal_branch || 'Filial belgilanmagan').sort((a, b) => b.deals - a.deals);
   const byMgr = sumBy(rows.filter(r => r.deal_manager_id), r => r.deal_manager).filter(o => o.deals >= 5).sort((a, b) => b.won - a.won);
-  return card(h3('Umumiy voronka', `Tanlangan davrda (${fmtDay(S.from)}${S.from !== S.to ? ' — ' + fmtDay(S.to) : ''}) kelgan barcha leadlar. Bosqichlar orasidagi raqam — oldingi bosqichdan o'tganlar ulushi, 50% dan past bo'lsa qizil.`) + `<div>${bars}</div>`, 'mb-6') +
+  return card(h3('Umumiy voronka', `Tanlangan davrda (${fmtDay(S.from)}${S.from !== S.to ? ' — ' + fmtDay(S.to) : ''}) kelgan barcha leadlar. Bosqichlar orasidagi raqam — oldingi bosqichdan o'tganlar ulushi, 50% dan past bo'lsa qizil.`) + `<div>${bars}</div>` + wonGap(t.won), 'mb-6') +
     stageCards() +
     card(h3("Lead stadiyasi bo'yicha konversiya", "Hozir shu stadiyada turgan leadlar: ulardan nechtasi sotuvga aylangan, jarayonda, deal yopilgan yoki sifatsiz.") + outcomeTable('Stadiya', groupSum(S.data.statusOut, r => r.status_name).map(o => ({ ...o, sort: Math.min(...S.data.statusOut.filter(r => r.status_name === o.key).map(r => r.sort)) })).sort((a, b) => a.sort - b.sort), r => `<span class="font-semibold">${esc(r.key)}</span>`), 'mb-6') +
     card(h3("Operatorlar (kim gaplashgan)", "Lead egasi (call-markaz). Ustun nomini bosing — eng yuqori/past konversiya.") + outcomeTable('Operator', groupSum(S.data.operators, r => r.operator).filter(o => o.leads >= 20).sort((a, b) => b.leads - a.leads), r => `<span class="font-semibold">${esc(r.key)}</span>`), 'mb-6') +
