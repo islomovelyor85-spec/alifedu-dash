@@ -1,0 +1,1261 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sotuv auditi</title>
+<script src="https://cdn.tailwindcss.com/3.4.16"></script>
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script>
+  const v = n => `rgb(var(--${n}) / <alpha-value>)`;
+  tailwind.config = { darkMode: 'class', theme: { extend: {
+    fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+    colors: { bg: v('bg'), surface: v('surface'), surface2: v('surface2'), line: v('line'), fg: v('fg'), muted: v('muted'), accent: v('accent'), success: v('success'), warn: v('warn'), danger: v('danger'), info: v('info') },
+    boxShadow: { card: '0 1px 2px rgb(0 0 0 / .04), 0 4px 16px -8px rgb(0 0 0 / .08)' } } } };
+</script>
+<style>
+  :root { --bg: 236 238 242; --surface: 255 255 255; --surface2: 244 245 248; --line: 228 230 236; --fg: 17 17 19; --muted: 118 122 134; --accent: 67 82 230; --success: 22 163 74; --warn: 234 140 0; --danger: 230 57 70; --info: 67 82 230; color-scheme: light; --c-blue: 67 82 230; --c-violet: 139 92 246; --c-teal: 13 148 136; --c-green: 22 163 74; --c-amber: 245 158 11; --c-rose: 239 68 68; --c-crimson: 148 163 184; }
+  .dark { --bg: 17 15 13; --surface: 27 24 21; --surface2: 38 34 30; --line: 56 50 44; --fg: 240 235 226; --muted: 163 153 140; --accent: 168 120 42; --success: 96 190 122; --warn: 200 150 60; --danger: 196 110 80; --info: 168 120 42; color-scheme: dark; --c-blue: 168 120 42; --c-violet: 140 100 40; --c-teal: 196 150 70; --c-green: 96 190 122; --c-amber: 190 140 60; --c-rose: 130 92 44; --c-crimson: 96 68 34; }
+  body { -webkit-font-smoothing: antialiased; }
+  .nav-item.active { background: rgb(var(--accent)); color: #fff; box-shadow: 0 6px 16px -6px rgb(var(--accent) / .6); }
+  .dark .nav-item.active { background: rgb(var(--accent) / .14); color: rgb(var(--fg)); box-shadow: none; }
+  .dark .nav-item.active i { color: rgb(var(--accent)); }
+  .hero { background: rgb(var(--fg)); color: rgb(var(--surface)); }
+  .dark .hero { background: rgb(var(--surface)); color: rgb(var(--fg)); }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  td, th { white-space: nowrap; }
+</style>
+</head>
+<body class="bg-bg text-fg font-sans">
+<div id="app"></div>
+<script>
+// Sales audit dashboard (Phase 4). Reads v_* views; admins only (RLS is_admin()).
+const SB_URL = 'https://egkwzobipdpkorbqyyjh.supabase.co';
+const SB_KEY = 'sb_publishable_CaFqJ6b9MBQf-WUbf2wepw_9VDbDjqc';
+const sbc = window.supabase.createClient(SB_URL, SB_KEY);
+let theme = null; try { theme = localStorage.getItem('audit-theme'); } catch {}
+if (theme !== 'light') document.documentElement.classList.add('dark');
+function toggleTheme() { const d = document.documentElement.classList.toggle('dark'); try { localStorage.setItem('audit-theme', d ? 'dark' : 'light'); } catch {} render(); }
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const num = n => n == null || !isFinite(n) ? '—' : Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+const money = n => n == null || !isFinite(n) ? '—' : num(n) + " so'm";
+const pct = n => n == null || !isFinite(n) ? '—' : (n * 100).toFixed(1) + '%';
+const div = (a, b) => b ? a / b : null;
+const CCY = { USD: '$', EUR: '€', RUB: '₽', UZS: '' };
+// Meta spend is in the ad account currency; show it with the so'm equivalent (CBU rate from sync-meta).
+const adMoney = (n, uzs = true) => { if (n == null || !isFinite(n)) return '—'; const c = S.data.cfg?.ad_currency || 'USD', fx = +S.data.cfg?.fx_rate || 0;
+  const main = c === 'UZS' ? money(n) : `${CCY[c] ?? c + ' '}${n >= 100 ? num(n) : (+n).toFixed(2)}`;
+  return uzs && fx && c !== 'UZS' ? `${main}<div class="text-[10px] text-muted">≈ ${moneyShortTop(n * fx)} so'm</div>` : main; };
+const moneyShortTop = n => Math.abs(n) >= 1e9 ? (n / 1e9).toFixed(2) + ' mlrd' : Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(1) + ' mln' : num(n);
+const TONE = { success: 'bg-success/10 text-success', warn: 'bg-warn/10 text-warn', danger: 'bg-danger/10 text-danger', info: 'bg-info/10 text-info', neutral: 'bg-surface2 text-muted' };
+const chip = (t, tone = 'neutral') => `<span class="inline-flex text-[11px] font-semibold px-2 py-0.5 rounded-full ${TONE[tone]}">${t}</span>`;
+const card = (inner, cls = '') => `<div class="bg-surface rounded-3xl p-4 sm:p-5 ${cls}">${inner}</div>`;
+const h3 = (t, sub = '') => `<div class="mb-4"><h3 class="font-semibold text-[15px]">${t}</h3>${sub ? `<p class="text-xs text-muted mt-0.5">${sub}</p>` : ''}</div>`;
+const empty = t => `<div class="text-sm text-muted py-8 text-center">${t}</div>`;
+// Sort value: explicit c.s, else the first number in the rendered cell, else its text.
+const cellVal = (c, r) => { if (c.s) return c.s(r); const t = String(c.f(r)).replace(/<[^>]+>/g, ' ').trim(); const m = t.replace(/(\d) (?=\d)/g, '$1').match(/-?\d+(\.\d+)?/); return m ? +m[0] : t; };
+function setSort(key, i) { const cur = S.sort[key]; S.sort[key] = { i, dir: cur && cur.i === i ? -cur.dir : -1 }; render(); }
+const table = (cols, rows, foot, limit) => {
+  const key = cols.map(c => c.t).join('|'), st = S.sort[key];
+  if (st && rows.length) { const c = cols[st.i]; rows = [...rows].sort((a, b) => { const x = cellVal(c, a), y = cellVal(c, b); const v = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y)); return v * st.dir; }); }
+  if (limit) rows = rows.slice(0, limit);
+  const arrow = i => st && st.i === i ? (st.dir < 0 ? ' ↓' : ' ↑') : '';
+  return rows.length ? `<div class="overflow-x-auto -mx-4 sm:-mx-5"><table class="w-full text-sm"><thead><tr class="text-left text-xs text-muted border-b border-line">${cols.map((c, i) => `<th onclick="setSort('${esc(key).replace(/'/g, "\\'")}',${i})" title="Saralash" class="px-4 sm:px-5 py-2 font-semibold cursor-pointer select-none hover:text-fg ${c.r ? 'text-right' : ''}">${c.t}${arrow(i)}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr class="border-b border-line/60 last:border-0">${cols.map(c => `<td class="px-4 sm:px-5 py-2.5 ${c.r ? 'text-right tabular-nums' : ''}">${c.f(r)}</td>`).join('')}</tr>`).join('')}</tbody>${foot ? `<tfoot><tr class="border-t-2 border-line font-semibold bg-surface2/50">${cols.map(c => `<td class="px-4 sm:px-5 py-2.5 ${c.r ? 'text-right tabular-nums' : ''}">${c.f(foot)}</td>`).join('')}</tr></tfoot>` : ''}</table></div>` : empty("Ma'lumot yo'q");
+};
+// Inline data bar (like BI dashboards): coloured bar scaled to the column max + the number.
+const bar = (v, max, color, label = num(v)) => `<div class="flex items-center gap-2 min-w-[120px]"><div class="flex-1 h-2 rounded-full bg-surface2 overflow-hidden"><div class="h-2 rounded-full" style="width:${max ? Math.max(v / max * 100, v ? 3 : 0).toFixed(1) : 0}%;background:rgb(var(--c-${color}))"></div></div><span class="text-[13px] tabular-nums font-semibold min-w-[2.5rem] text-right">${label}</span></div>`;
+// Outcome columns shared by the date / source / operator tables.
+const OUT = [['leads', 'Leadlar', 'blue'], ['contacted', 'Aloqa', 'violet'], ['qual', 'Sifatli', 'teal'], ['deals', 'Deal', 'violet'], ['came_to_branch', 'Filialga keldi', 'violet'],
+  ['won', 'Sotuv', 'green'], ['in_progress', 'Jarayonda', 'amber'], ['deal_lost', "Beko bo'ldi", 'rose'], ['junk', 'Sifatsiz', 'crimson']];
+function outcomeTable(label, rows, keyCell, sortDefault) {
+  const sum = k => rows.reduce((a, r) => a + +r[k], 0);
+  const foot = { _foot: true, ...Object.fromEntries(OUT.map(([k]) => [k, sum(k)])) };
+  const max = Object.fromEntries(OUT.map(([k]) => [k, Math.max(0, ...rows.map(r => +r[k]))]));
+  const conv = r => div(+r.won, +r.leads), convQ = r => div(+r.won, +r.qual);
+  const maxConv = Math.max(0, ...rows.map(r => conv(r) || 0)), maxConvQ = Math.max(0, ...rows.map(r => convQ(r) || 0));
+  const cols = [{ t: label, f: r => r._foot ? 'Jami' : keyCell(r), s: sortDefault },
+    ...OUT.map(([k, t, c]) => ({ t, r: 1, s: r => +r[k], f: r => r._foot ? num(r[k]) : bar(+r[k], max[k], c) })),
+    { t: 'Konversiya umumiy', r: 1, s: r => conv(r) ?? -1, f: r => r._foot ? pct(conv(r)) : bar(conv(r) || 0, maxConv, 'green', pct(conv(r))) },
+    { t: 'Konversiya sifatli', r: 1, s: r => convQ(r) ?? -1, f: r => r._foot ? pct(convQ(r)) : bar(convQ(r) || 0, maxConvQ, 'teal', pct(convQ(r))) }];
+  return table(cols, rows, foot);
+}
+const groupSum = (rows, keyFn) => { const by = {}; for (const r of rows) { const k = keyFn(r), o = by[k] ??= { key: k, ...Object.fromEntries(OUT.map(([x]) => [x, 0])), revenue: 0 }; for (const [x] of OUT) o[x] += +r[x]; o.revenue += +r.revenue; } return Object.values(by); };
+
+const iso = d => new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const S = { page: 'overview', from: iso(addDays(new Date(), -29)), to: iso(new Date()), course: '', branch: '', data: {}, sort: {}, cal: null, source: '', ad: { status: 'active', level: 'ad', q: '', limit: 20 }, ai: [], aiBusy: false, menu: false, op: null, call: null, speedLimit: 300, syncing: false, warn: [] };
+// Quick ranges, like the Bitrix/ads date pickers.
+function quickRanges() {
+  const t = new Date(), y = addDays(t, -1), m0 = new Date(t.getFullYear(), t.getMonth(), 1), m1 = new Date(t.getFullYear(), t.getMonth() + 1, 0),
+    pm0 = new Date(t.getFullYear(), t.getMonth() - 1, 1), pm1 = new Date(t.getFullYear(), t.getMonth(), 0);
+  return [['Bugun', t, t], ['Kecha', y, y], ['Oxirgi 7 kun', addDays(t, -6), t], ['Oxirgi 30 kun', addDays(t, -29), t], ['Oxirgi 90 kun', addDays(t, -89), t], null,
+    ['Bu oy', m0, t], ["O'tgan oy", pm0, pm1], ['Butun oy (plan)', m0, m1]].map(r => r && [r[0], iso(r[1]), iso(r[2])]);
+}
+const MON = ['yan', 'fev', 'mar', 'apr', 'may', 'iyn', 'iyl', 'avg', 'sen', 'okt', 'noy', 'dek'];
+const fmtDay = d => `${+d.slice(8, 10)} ${MON[+d.slice(5, 7) - 1]} ${d.slice(0, 4)}`;
+function setRange(a, b) { S.from = a <= b ? a : b; S.to = a <= b ? b : a; S.cal = false; refresh(); }
+// Two-month range picker: click a start day, then an end day; quick ranges on the left.
+const MONTH_FULL = ['Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'Iyun', 'Iyul', 'Avgust', 'Sentabr', 'Oktabr', 'Noyabr', 'Dekabr'];
+const shortRange = (a, b) => a === b ? `${+a.slice(8)} ${MON[+a.slice(5, 7) - 1]}` : a.slice(0, 7) === b.slice(0, 7) ? `${+a.slice(8)}–${+b.slice(8)} ${MON[+a.slice(5, 7) - 1]}` : `${+a.slice(8)} ${MON[+a.slice(5, 7) - 1]} – ${+b.slice(8)} ${MON[+b.slice(5, 7) - 1]}`;
+function openCal() { const m = new Date(S.to + 'T00:00'); S.cal = { a: S.from, b: S.to, view: new Date(m.getFullYear(), m.getMonth() - 1, 1) }; render(); }
+function calShift(n) { const v = S.cal.view; S.cal.view = new Date(v.getFullYear(), v.getMonth() + n, 1); render(); }
+function calPick(d) { const c = S.cal; if (!c.a || c.b) { c.a = d; c.b = null; } else if (d < c.a) { c.b = c.a; c.a = d; } else c.b = d; render(); }
+function calPreset(a, b) { const m = new Date(b + 'T00:00'); S.cal = { a, b, view: new Date(m.getFullYear(), m.getMonth() - 1, 1) }; render(); }
+function monthGrid(first) {
+  const c = S.cal, today = iso(new Date()), y = first.getFullYear(), m = first.getMonth(), n = new Date(y, m + 1, 0).getDate(), pad = (first.getDay() + 6) % 7;
+  const end = c.b || c.a;
+  const cells = Array.from({ length: pad }, () => '<div></div>').concat(Array.from({ length: n }, (_, i) => {
+    const d = iso(new Date(y, m, i + 1)), edge = d === c.a || d === end, inside = c.a && end && d > c.a && d < end, future = d > today;
+    return `<button ${future ? 'disabled' : `onclick="calPick('${d}')"`} class="h-9 rounded-lg text-sm tabular-nums ${edge ? 'bg-accent text-surface font-bold' : inside ? 'bg-accent/15 text-fg' : future ? 'text-muted/40' : 'hover:bg-surface2'}">${i + 1}</button>`;
+  }));
+  return `<div class="flex-1 min-w-0"><div class="text-center font-semibold mb-3">${MONTH_FULL[m]} ${y}</div>
+    <div class="grid grid-cols-7 gap-1 text-center">${['Du', 'Se', 'Ch', 'Pa', 'Ju', 'Sh', 'Ya'].map(w => `<div class="text-[11px] text-muted pb-1">${w}</div>`).join('')}${cells.join('')}</div></div>`;
+}
+function calendar() {
+  const btn = `<button onclick="${S.cal ? 'S.cal=false;render()' : 'openCal()'}" class="h-9 px-3 rounded-xl bg-surface border border-line flex items-center gap-2"><i class="ph-bold ph-calendar-blank"></i>${fmtDay(S.from)}${S.from !== S.to ? ' — ' + fmtDay(S.to) : ''}</button>`;
+  if (!S.cal) return `<div class="relative">${btn}</div>`;
+  const c = S.cal, v = c.view, b = c.b || c.a, days = c.a ? Math.round((new Date(b) - new Date(c.a)) / 864e5) + 1 : 0;
+  const quick = quickRanges().map(r => r ? `<button onclick="calPreset('${r[1]}','${r[2]}')" class="w-full flex justify-between gap-2 px-3 py-2.5 rounded-xl text-sm ${c.a === r[1] && b === r[2] ? 'bg-accent/15 text-accent font-semibold' : 'hover:bg-surface2'}"><span>${r[0]}</span><span class="text-xs text-muted">${shortRange(r[1], r[2])}</span></button>` : '<div class="border-t border-line my-2"></div>').join('');
+  return `<div class="relative">${btn}
+    <div class="fixed inset-0 z-10" onclick="S.cal=false;render()"></div>
+    <div class="fixed left-1/2 -translate-x-1/2 top-20 z-20 w-[min(94vw,820px)] max-h-[85vh] overflow-y-auto bg-surface border border-line rounded-2xl shadow-card flex flex-col md:flex-row overflow-hidden">
+      <div class="md:w-56 p-3 md:border-r border-line"><div class="text-[11px] font-semibold tracking-wider text-muted px-3 pb-2">TEZKOR TANLASH</div>${quick}</div>
+      <div class="flex-1 p-4">
+        <div class="flex items-start gap-4">
+          <button onclick="calShift(-1)" class="h-9 w-9 shrink-0 rounded-xl border border-line hover:bg-surface2" aria-label="Oldingi oy"><i class="ph-bold ph-caret-left"></i></button>
+          <div class="flex-1 flex flex-col sm:flex-row gap-6">${monthGrid(v)}${monthGrid(new Date(v.getFullYear(), v.getMonth() + 1, 1))}</div>
+          <button onclick="calShift(1)" class="h-9 w-9 shrink-0 rounded-xl border border-line hover:bg-surface2" aria-label="Keyingi oy"><i class="ph-bold ph-caret-right"></i></button>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-line text-sm">
+          <span class="px-3 h-10 inline-flex items-center rounded-xl border border-line">${c.a ? fmtDay(c.a) : '—'}</span><span class="text-muted">—</span>
+          <span class="px-3 h-10 inline-flex items-center rounded-xl border border-line">${b ? fmtDay(b) : '—'}</span><span class="text-xs text-muted">${days} kun</span>
+          <div class="flex gap-2 ml-auto"><button onclick="S.cal=false;render()" class="h-10 px-4 rounded-xl bg-surface2 font-semibold">Bekor qilish</button>
+          <button ${c.a ? `onclick="setRange('${c.a}','${b}')"` : 'disabled'} class="h-10 px-4 rounded-xl bg-accent text-surface font-semibold">Qo'llash</button></div>
+        </div>
+      </div>
+    </div></div>`;
+}
+// Sidebar menu, grouped.
+const NAV = [
+  ['Tahlil', [['overview', 'Umumiy', 'ph-squares-four'], ['metrics', 'Kunlik metrikalar', 'ph-table'], ['branches', 'Filiallar', 'ph-buildings'], ['funnel', 'Voronka', 'ph-funnel'], ['daily', 'Kunlar va manbalar', 'ph-calendar-dots'], ['leads', 'Lead tahlili', 'ph-clock'], ['cohort', "Sotuv qachon bo'ladi", 'ph-calendar-check'], ['money', "To'lovlar va sikl", 'ph-wallet']]],
+  ['Marketing', [['creatives', 'Kreativlar', 'ph-film-strip'], ['pains', "Og'riqlar va e'tirozlar", 'ph-chat-circle-text'], ['briefs', 'Brieflar', 'ph-note-pencil']]],
+  ['Jamoa', [['managers', 'Menejerlar', 'ph-users'], ['calls', "Qo'ng'iroqlar tahlili", 'ph-phone'], ['speed', 'Aloqa tezligi', 'ph-timer']]],
+  ['AI', [['ai', 'AI yordamchi', 'ph-sparkle']]],
+  ['', [['status', 'Holat va eslatmalar', 'ph-bell-ringing'], ['guide', "Yo'riqnoma", 'ph-book-open'], ['settings', 'Sozlamalar', 'ph-gear']]],
+];
+const PAGES = NAV.flatMap(([, items]) => items);
+
+// Pages through results: the API returns at most 1000 rows per request.
+// A failing view is retried once, then left empty with a warning, so one slow query never blanks the whole platform.
+async function q(table, build = x => x) {
+  for (let attempt = 0; ; attempt++) {
+    const out = [];
+    try {
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await build(sbc.from(table).select('*')).range(from, from + 999);
+        if (error) throw new Error(error.message);
+        out.push(...data);
+        if (data.length < 1000) return out;
+      }
+    } catch (e) {
+      if (attempt < 1) continue;
+      S.warn.push(`${table}: ${e.message}`);
+      return [];
+    }
+  }
+}
+
+// Global AI-queue counters for the status page (head-only counts).
+async function queueStats() {
+  const cnt = async build => (await build(sbc.from('call_review').select('call_id', { count: 'exact', head: true }))).count ?? 0;
+  const d3 = new Date(Date.now() - 3 * 864e5).toISOString(), d1 = new Date(Date.now() - 864e5).toISOString();
+  const [pending, failed, done24] = await Promise.all([
+    cnt(x => x.is('transcript', null).is('error', null).gte('call_start', d3)),
+    cnt(x => x.is('transcript', null).not('error', 'is', null).gte('call_start', d3)),
+    cnt(x => x.not('transcript', 'is', null).gte('analyzed_at', d1)),
+  ]);
+  return { pending, failed, done24 };
+}
+
+async function load() {
+  S.warn = [];
+  const day = x => x.gte('day', S.from).lte('day', S.to);
+  const wk = new Date(S.from + 'T00:00'); wk.setDate(wk.getDate() - (wk.getDay() + 6) % 7); const weekFrom = iso(wk);
+  const [funnel, courses, cohort, creatives, naming, pains, taxonomy, objections, managers, briefs, cfg, sync, outcomes, sales, users, dealStages, hours, codes, daily, operators, statusOut, cycle, money, lostReasons, cohortSum, cohortSrc, spend, adDaily, adLeads, adCatalog, wonDaily, salesMonth, calls, speed, dm, dmLive, queue, brDaily, brSpend, brCamp] = await Promise.all([
+    q('v_funnel', x => x.eq('level', 'course_branch').gte('week', weekFrom).lte('week', S.to)),
+    q('course_settings'), q('v_cohort'), q('v_creative_score'),
+    Promise.all(['campaigns', 'adsets', 'ads'].map(t => q(t, x => x.eq('naming_error', true)).then(r => r.map(o => ({ ...o, kind: t }))))).then(a => a.flat()),
+    q('v_pain_conversion'), q('pain_taxonomy'), q('v_objections'), q('v_managers'),
+    q('briefs', x => x.order('created_at', { ascending: false })), q('audit_settings').then(r => r[0] || {}), q('sync_state'),
+    q('v_lead_outcomes', day), q('v_sales_funnel', day),
+    q('crm_statuses', x => x.eq('entity', 'USER')).then(r => Object.fromEntries(r.map(u => [u.status_id, u.name]))),
+    q('v_deal_stages', day), q('v_lead_hours', day), q('v_lead_codes', day), q('v_daily_outcomes', day), q('v_operator_outcomes', day), q('v_status_outcomes', day), q('v_sales_cycle', day), q('v_deal_money', day), q('v_deal_lost_reasons', day), q('v_cohort_summary'), q('v_cohort_src'), q('v_spend_daily', day),
+    q('ad_daily', x => x.gte('date', S.from).lte('date', S.to)), q('v_ad_leads', day), q('v_ad_catalog'), q('v_won_daily', day), q('v_sales_by_month', x => x.gte('sale_month', '2026-07-01')),
+    q('call_review', x => x.gte('call_start', S.from).lte('call_start', S.to + 'T23:59:59').order('call_start', { ascending: false })),
+    q('v_speed_to_lead', day), q('daily_metrics', x => x.order('day', { ascending: false })),
+    q('v_daily_metrics', x => x.gte('day', iso(addDays(new Date(), -1)))), queueStats(),
+    q('v_branch_daily', day), q('v_branch_spend_daily', day), q('v_branch_campaign', day),
+  ]);
+  S.data = { funnel, courses, cohort, creatives, naming, pains, taxonomy, objections, managers, briefs, cfg, sync, outcomes, sales, users, dealStages, hours, codes, daily, operators, statusOut, cycle, money, lostReasons, cohortSum, cohortSrc, spend, adDaily, adLeads, adCatalog, wonDaily, salesMonth, calls, speed, dm, dmLive, queue, brDaily, brSpend, brCamp };
+}
+
+const opts = (vals, cur) => ['', ...vals].map(v => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${v ? esc(v) : 'Hammasi'}</option>`).join('');
+const uniq = a => [...new Set(a.filter(Boolean))].sort();
+const match = r => (!S.course || r.course === S.course) && (!S.branch || r.branch === S.branch);
+
+function shell(body) {
+  const d = S.data, title = (PAGES.find(p => p[0] === S.page) || [])[1] || '';
+  const sources = ['', ...uniq([...(d.daily || []), ...(d.cohortSrc || [])].map(r => r.source))];
+  const navItem = ([k, t, i]) => `<button onclick="S.page='${k}';S.menu=false;S.op=null;S.call=null;render();scrollTo(0,0)" class="nav-item ${S.page === k ? 'active' : ''} w-full flex items-center gap-2.5 px-3 h-9 rounded-lg text-[13px] font-medium text-muted hover:text-fg hover:bg-surface2 transition"><i class="ph-bold ${i} text-base"></i>${t}</button>`;
+  const nav = NAV.map(([g, items]) => `${g ? `<div class="px-3 pt-4 pb-1.5 text-[10px] font-semibold tracking-[.14em] uppercase text-muted/70">${g}</div>` : '<div class="pt-4"></div>'}${items.map(navItem).join('')}`).join('');
+  return `<div class="min-h-screen">
+    <aside class="${S.menu ? 'flex' : 'hidden'} lg:flex fixed inset-y-0 left-0 z-30 w-60 flex-col bg-surface border-r border-line">
+      <div class="px-5 h-16 flex items-center gap-2.5 border-b border-line"><div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:rgb(var(--accent) / .18)"><i class="ph-bold ph-chart-line-up text-accent"></i></div><div><div class="font-bold text-sm leading-tight">Sotuv auditi</div><div class="text-[11px] text-muted leading-tight">Robbit akademiyasi</div></div></div>
+      <nav class="flex-1 overflow-y-auto px-3 pb-4">${nav}</nav>
+      <div class="p-3 border-t border-line"><button onclick="sbc.auth.signOut().then(boot)" class="w-full flex items-center gap-2.5 px-3 h-9 rounded-lg text-[13px] text-muted hover:text-fg hover:bg-surface2"><i class="ph-bold ph-sign-out"></i>Chiqish</button></div>
+    </aside>
+    ${S.menu ? '<div class="fixed inset-0 z-20 bg-black/50 lg:hidden" onclick="S.menu=false;render()"></div>' : ''}
+    <main class="lg:pl-60 min-w-0">
+      <header class="sticky top-0 z-10 bg-bg/90 backdrop-blur border-b border-line">
+        <div class="px-4 lg:px-8 h-16 flex items-center gap-3">
+          <button onclick="S.menu=true;render()" class="lg:hidden h-9 w-9 rounded-lg bg-surface2" aria-label="Menyu"><i class="ph-bold ph-list"></i></button>
+          <h1 class="text-lg font-bold truncate">${title}</h1>
+          <div class="ml-auto flex items-center gap-2 text-sm">
+            <button onclick="syncNow()" ${S.syncing ? 'disabled' : ''} class="h-9 px-3 rounded-xl bg-surface border border-line flex items-center gap-1.5" title="Bitrix, Meta va qo'ng'iroqlarni hozir yangilash"><i class="ph-bold ph-arrows-clockwise ${S.syncing ? 'animate-spin' : ''}"></i><span class="hidden sm:inline">${S.syncing ? 'Yangilanmoqda…' : 'Yangilash'}</span></button>
+            <button onclick="toggleTheme()" class="h-9 w-9 rounded-full bg-surface border border-line" aria-label="Rang rejimi" title="Yorug' / qora"><i class="ph-bold ${document.documentElement.classList.contains('dark') ? 'ph-sun' : 'ph-moon'}"></i></button>
+            ${S.page === 'settings' ? '' : calendar()}
+            ${SOURCE_PAGES.includes(S.page) ? `<select onchange="S.source=this.value;render()" class="h-9 px-2 rounded-xl bg-surface border ${S.source ? 'border-accent text-accent' : 'border-line'}" aria-label="Manba">${sources.map(v => `<option value="${esc(v)}" ${v === S.source ? 'selected' : ''}>${v ? esc(v) : 'Barcha manbalar'}</option>`).join('')}</select>` : ''}
+          </div>
+        </div>
+      </header>
+      <div class="px-4 lg:px-8 py-6 max-w-[1400px]">${S.warn.length ? `<div class="mb-4 rounded-2xl border border-warn/40 bg-warn/10 text-[12.5px] p-3"><b>Ba'zi ma'lumotlar yuklanmadi</b> — «Yangilash»ni bosing. <span class="text-muted">${S.warn.map(esc).join(' · ')}</span></div>` : ''}${body}</div>
+    </main>
+  </div>`;
+}
+const SOURCE_PAGES = ['overview', 'cohort'];
+const bySource = rows => rows.filter(r => !S.source || r.source === S.source);
+
+const maxCpql = course => S.data.courses.find(c => c.course === course)?.max_cpql;
+
+// Ring gauges (watch-style) for conversion shares.
+const ring = (label, v, color) => { const r = 34, c = 2 * Math.PI * r, f = Math.max(0, Math.min(1, v || 0));
+  return `<div class="flex flex-col items-center gap-2"><svg viewBox="0 0 84 84" class="w-[84px] h-[84px] -rotate-90"><circle cx="42" cy="42" r="${r}" fill="none" stroke="rgb(var(--c-${color}) / .18)" stroke-width="9"/><circle cx="42" cy="42" r="${r}" fill="none" stroke="rgb(var(--c-${color}))" stroke-width="9" stroke-linecap="round" stroke-dasharray="${(c * f).toFixed(1)} ${c.toFixed(1)}"/></svg>
+    <div class="-mt-[66px] mb-[30px] text-sm font-bold tabular-nums">${pct(v)}</div><div class="text-[11px] font-semibold uppercase tracking-wide" style="color:rgb(var(--c-${color}))">${label}</div></div>`; };
+const rings = (items, title) => `<div class="bg-surface rounded-3xl p-5 mb-6"><div class="text-xs text-muted mb-4">${title}</div><div class="grid grid-cols-3 lg:grid-cols-6 gap-4">${items.map(([l, v, c]) => ring(l, v, c)).join('')}</div></div>`;
+function overview() {
+  const rows = bySource(S.data.daily);
+  const t = groupSum(rows, () => 'all')[0];
+  if (!t) return card(empty("Tanlangan davrda lead yo'q"));
+  const kpi = (l, v, sub, color, hero) => `<div class="${hero ? 'hero' : 'bg-surface'} rounded-3xl p-5"><div class="text-[11px] font-semibold tracking-wide uppercase" style="color:rgb(var(--c-${color}))">${l}</div><div class="text-[28px] leading-tight font-bold mt-1 tabular-nums">${v}</div>${sub ? `<div class="text-[11px] text-muted mt-1">${sub}</div>` : ''}</div>`;
+  const spend = S.data.spend.reduce((a, r) => a + +r.spend, 0), fx = +S.data.cfg?.fx_rate || 0;
+  const paid = groupSum(S.data.daily.filter(r => r.source === 'Target'), () => 't')[0] || { leads: 0, qual: 0, won: 0, revenue: 0 };
+  const metaLeads = S.data.spend.reduce((a, r) => a + +r.meta_leads, 0);
+  // Sales closed in the period (any lead month) — what the sales team counts as "this month's sales".
+  const won = bySource(S.data.wonDaily).reduce((a, r) => ({ n: a.n + +r.won, sum: a.sum + +r.amount }), { n: 0, sum: 0 });
+  // A sale = deal now in To'lov qildi, Nabor guruh or Сделка успешна; show where they stand today.
+  const wonStage = {}; for (const r of bySource(S.data.wonDaily)) wonStage[r.stage] = (wonStage[r.stage] || 0) + +r.won;
+  const stageOrder = ["To'lov qildi", 'Nabor guruh', 'Сделка успешна'];
+  const wonStages = Object.entries(wonStage).sort((a, b) => (stageOrder.indexOf(a[0]) + 1 || 9) - (stageOrder.indexOf(b[0]) + 1 || 9))
+    .map(([k, n]) => `${esc(k)}: <b>${num(n)}</b>`).join(' · ');
+  const wonTarget = S.data.wonDaily.filter(r => r.source === 'Target').reduce((a, r) => ({ n: a.n + +r.won, sum: a.sum + +r.amount }), { n: 0, sum: 0 });
+  const romi = fx && spend ? div(wonTarget.sum - spend * fx, spend * fx) : null;
+  const adKpis = spend ? `<div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
+      ${kpi('Reklama xarajati', adMoney(spend), `Meta · ${num(metaLeads)} natija (Results)`, 'amber')}
+      ${kpi('Lead narxi', adMoney(div(spend, paid.leads)), `Target: ${num(paid.leads)} lead Bitrix'da`, 'blue')}
+      ${kpi('CPQL', adMoney(div(spend, paid.qual)), `sifatli lead narxi · ${num(paid.qual)} ta`, 'teal')}
+      ${kpi('Sotuv narxi', adMoney(div(spend, wonTarget.n)), `${adMoney(spend, false)} ÷ ${num(wonTarget.n)} ta sotuv (Target leadlaridan, shu davrda «To'lov qildi» / «Nabor guruh» / «Успешна»ga o'tgan)`, 'green')}
+      ${kpi('ROMI', pct(romi), fx ? `tushum ${moneyShortTop(wonTarget.sum)} so'm · kurs ${num(fx)}` : 'kurs yo\'q', 'violet')}
+    </div>` : '';
+  const days = Math.round((new Date(S.to) - new Date(S.from)) / 864e5) + 1;
+  return `<div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
+      ${kpi('Jami leadlar', num(t.leads), `${fmtDay(S.from)}${S.from !== S.to ? ' — ' + fmtDay(S.to) : ''} · kuniga ~${num(t.leads / days)}`, 'violet', true)}
+      ${kpi('Sifatli', num(t.qual), pct(div(t.qual, t.leads)) + ' leaddan', 'teal')}
+      ${kpi('Sotuv', num(won.n), `${wonStages ? wonStages + '<br>' : ''}shu davrda sotuvga o'tgan · ${num(t.won)} tasi shu davr leadlaridan`, 'green')}
+      ${kpi('Jarayonda', num(t.in_progress), 'hali hal bo\'lmagan', 'amber')}
+      ${kpi('Sifatsiz', num(t.junk), pct(div(t.junk, t.leads)) + ' leaddan', 'crimson')}
+    </div>` +
+    rings([['Aloqa', div(t.contacted, t.leads), 'blue'], ['Sifatli', div(t.qual, t.leads), 'teal'], ['Deal', div(t.deals, t.leads), 'violet'], ['Filialga keldi', div(t.came_to_branch, t.leads), 'amber'], ['Sotuv', div(t.won, t.leads), 'green'], ['Sifatsiz', div(t.junk, t.leads), 'rose']], 'Jami leadlardan qanchasi qayergacha borgan') +
+    (spend ? adKpis : `<div class="mb-6 text-xs text-muted">Tanlangan davrda reklama xarajati yo'q.</div>`) +
+    card(h3(S.source ? `Manba: ${esc(S.source)}` : 'Manbalar', "Tanlangan davrdagi leadlar va ular qayergacha borgani") + outcomeTable('Manba', groupSum(rows, r => r.source).sort((a, b) => b.leads - a.leads), r => `<button onclick="S.source='${esc(r.key).replace(/'/g, "\\'")}';render()" class="font-semibold hover:text-accent text-left">${esc(r.key)}</button>`));
+}
+
+// Sales counted by the month they happened, split by the month the lead came in.
+function salesByMonth(list) {
+  const MONTHS = ['Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'Iyun', 'Iyul', 'Avgust', 'Sentyabr', 'Oktyabr', 'Noyabr', 'Dekabr'];
+  const by = {};
+  for (const o of list) for (const k of [0, 1, 2, 3]) {
+    const n = o.m[k] || 0; if (!n) continue;
+    const key = iso(new Date(+o.month.slice(0, 4), +o.month.slice(5, 7) - 1 + k, 1)).slice(0, 7);
+    const r = by[key] ??= { key, total: 0, k: [0, 0, 0, 0] }; r.total += n; r.k[k] += n;
+  }
+  const rows = Object.values(by).sort((a, b) => b.key.localeCompare(a.key)), mx = Math.max(1, ...rows.map(r => r.total));
+  const part = (r, k) => r.k[k] ? `${num(r.k[k])} <span class="text-xs text-muted">${pct(div(r.k[k], r.total))}</span>` : '<span class="text-muted">0</span>';
+  return card(h3("Oy bo'yicha jami sotuvlar", "Sotuv bo'lgan oy bo'yicha: shu oydagi barcha sotuvlar va ular qaysi oy leadlaridan kelgani. Masalan, oktyabr sotuvlarining bir qismi — sentyabr leadlari.") + table([
+    { t: 'Sotuv oyi', s: r => r.key, f: r => `<b>${MONTHS[+r.key.slice(5, 7) - 1]} ${r.key.slice(0, 4)}</b>` },
+    { t: 'Jami sotuv', r: 1, s: r => r.total, f: r => bar(r.total, mx, 'green') },
+    { t: "Shu oy leadlaridan", r: 1, s: r => r.k[0], f: r => part(r, 0) },
+    { t: "O'tgan oy leadlaridan", r: 1, s: r => r.k[1], f: r => part(r, 1) },
+    { t: '2 oy oldingi leadlardan', r: 1, s: r => r.k[2], f: r => part(r, 2) },
+    { t: '3+ oy oldingi', r: 1, s: r => r.k[3], f: r => part(r, 3) },
+  ], rows), 'mb-6');
+}
+
+// Sales kanban: one column per sale month; cards per source show which lead month each sale came from.
+const AGE = [[0, 'Shu oy leadlari', 'green'], [1, "O'tgan oy leadlari", 'amber'], [2, '2 oy oldingi', 'teal'], [3, 'Eski leadlar', 'violet'], [-1, 'Leadsiz', 'crimson']];
+function salesKanban(cohortList) {
+  const MONTHS = ['Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'Iyun', 'Iyul', 'Avgust', 'Sentyabr', 'Oktyabr', 'Noyabr', 'Dekabr'];
+  const rows = bySource(S.data.salesMonth);
+  // Months touched by the selected dates (latest 3 when the range has no sales).
+  const all = [...new Set(rows.map(r => r.sale_month))].sort().reverse(), inRange = all.filter(m => m.slice(0, 7) >= S.from.slice(0, 7) && m.slice(0, 7) <= S.to.slice(0, 7));
+  const months = (inRange.length ? inRange : all).slice(0, 6);
+  if (!months.length) return card(empty("Sotuv yo'q"));
+  // Leads of a month not decided inside it (sold later or still open) — carried into the next month.
+  const carried = m => { const o = cohortList.find(x => x.month === m); return o ? o.still_open + o.won_later : null; };
+  const seg = (by, total) => `<div class="flex h-2 rounded-full overflow-hidden bg-surface2">${AGE.map(([a, , c]) => by[a] ? `<div style="width:${(by[a] / total * 100).toFixed(1)}%;background:rgb(var(--c-${c}))"></div>` : '').join('')}</div>`;
+  const col = m => {
+    const mine = rows.filter(r => r.sale_month === m), won = mine.filter(r => r.kind === 'won'), paid = mine.filter(r => r.kind === 'paid');
+    const total = won.reduce((a, r) => a + +r.sales, 0), paidN = paid.reduce((a, r) => a + +r.sales, 0);
+    const byAge = {}; for (const r of won) byAge[r.age] = (byAge[r.age] || 0) + +r.sales;
+    const src = {}; for (const r of won) { const o = src[r.source] ??= { n: 0, by: {} }; o.n += +r.sales; o.by[r.age] = (o.by[r.age] || 0) + +r.sales; }
+    const cards = Object.entries(src).sort((a, b) => b[1].n - a[1].n).map(([name, o]) => `<div class="rounded-2xl bg-surface2 p-3.5">
+        <div class="flex items-baseline justify-between gap-2"><span class="text-[13px] font-semibold truncate">${esc(name)}</span><span class="text-lg font-bold tabular-nums">${num(o.n)}</span></div>
+        <div class="mt-2">${seg(o.by, o.n)}</div>
+        <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted">${AGE.filter(([a]) => o.by[a]).map(([a, l, c]) => `<span><b class="tabular-nums" style="color:rgb(var(--c-${c}))">${o.by[a]}</b> ${l.toLowerCase()}</span>`).join('')}</div></div>`).join('');
+    const cr = carried(m), cur = m.slice(0, 7) === new Date().toISOString().slice(0, 7);
+    return `<div class="min-w-[280px] flex-1 rounded-3xl bg-surface p-4 flex flex-col gap-3">
+      <div class="flex items-center justify-between"><span class="font-semibold">${MONTHS[+m.slice(5, 7) - 1]} ${m.slice(0, 4)}</span>${cur ? '<span class="text-[11px] px-2 py-0.5 rounded-full bg-accent/15 text-accent">joriy oy</span>' : ''}</div>
+      <div><div class="text-4xl font-bold tabular-nums">${num(total)}</div><div class="text-xs text-muted">sotuv («Сделка успешна»)${paidN ? ` · yana <b class="text-fg">${paidN}</b> ta «To'lov qildi», hali yopilmagan` : ''}</div></div>
+      ${seg(byAge, total)}
+      <div class="grid grid-cols-2 gap-2">${AGE.filter(([a]) => byAge[a]).map(([a, l, c]) => `<div class="rounded-xl px-3 py-2" style="background:rgb(var(--c-${c}) / .12)"><div class="text-lg font-bold tabular-nums" style="color:rgb(var(--c-${c}))">${byAge[a]}</div><div class="text-[11px] text-muted">${l}</div></div>`).join('')}</div>
+      ${cr != null ? `<div class="rounded-xl border border-dashed border-line px-3 py-2 text-xs text-muted">→ Keyingi oyga o'tdi: <b class="text-fg tabular-nums">${num(cr)}</b> ta lead${cur ? ' (oy hali tugamagan)' : ''}</div>` : ''}
+      <div class="text-[11px] uppercase tracking-wide text-muted mt-1">Manbalar bo'yicha</div>
+      <div class="flex flex-col gap-2">${cards}</div></div>`;
+  };
+  return card(h3(`Oy bo'yicha sotuvlar${S.source ? ' — ' + esc(S.source) : ''}`, "Har ustun — sotuv bo'lgan oy. Raqamlar sotuv qaysi oy leadidan kelganini ko'rsatadi. «Eski leadlar» — 2 oydan oldingi yoki platformaga yuklanmagan leadlar (iyuldan oldin).") +
+    `<div class="flex gap-4 overflow-x-auto pb-2 -mx-1 px-1">${months.map(col).join('')}</div>`);
+}
+function cohort() {
+  const by = {};
+  for (const r of bySource(S.data.cohortSrc)) {
+    const o = by[r.lead_month] ??= { month: r.lead_month, leads: 0, won: 0, still_open: 0, m: {} };
+    o.leads += +r.leads; o.won += +r.won; o.still_open += +r.still_open;
+    [0, 1, 2, 3].forEach(k => { o.m[k] = (o.m[k] || 0) + +r['m' + k]; });
+  }
+  const list = Object.values(by).filter(o => o.month >= '2026-07-01' && o.month.slice(0, 7) <= S.to.slice(0, 7)).map(o => ({ ...o, won_same_month: o.m[0], won_later: o.m[1] + o.m[2] + o.m[3] })).sort((a, b) => b.month.localeCompare(a.month));
+  if (!list.length) return card(empty("Ma'lumot yo'q"));
+  const MONTHS = ['Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'Iyun', 'Iyul', 'Avgust', 'Sentyabr', 'Oktyabr', 'Noyabr', 'Dekabr'];
+  const name = m => MONTHS[+m.slice(5, 7) - 1], nextName = (m, k) => MONTHS[(+m.slice(5, 7) - 1 + k) % 12];
+  const COLORS = ['green', 'teal', 'blue', 'violet'];
+  const maxM = Math.max(1, ...list.flatMap(o => [0, 1, 2, 3].map(k => o.m[k] || 0)));
+  const carried = o => o.still_open + o.won_later;
+  const mx = f => Math.max(1, ...list.map(f));
+  const cell = (o, k) => { const n = o.m[k] || 0, future = new Date(+o.month.slice(0, 4), +o.month.slice(5, 7) - 1 + k, 1) > new Date();
+    if (future) return `<td class="p-1"><div class="h-16 rounded-xl border border-dashed border-line flex items-center justify-center text-[11px] text-muted">hali kelmadi</div></td>`;
+    const c = COLORS[k];
+    return `<td class="p-1"><div class="h-16 rounded-xl bg-surface2 border border-line px-2 py-1.5 flex flex-col justify-between"><div class="flex items-baseline justify-between gap-1"><span class="text-lg font-bold tabular-nums" style="color:rgb(var(--c-${c}))">${n}</span><span class="text-[10px] text-muted">${nextName(o.month, k)}</span></div><div class="text-[10px] text-muted">sotildi · ${pct(div(n, o.leads))}</div><div class="h-1 rounded-full bg-line"><div class="h-1 rounded-full" style="width:${(n / maxM * 100).toFixed(0)}%;background:rgb(var(--c-${c}))"></div></div></div></td>`; };
+  const split = o => [0, 1, 2, 3].filter(k => o.m[k]).map(k => `<span style="color:rgb(var(--c-${COLORS[k]}))">${o.m[k]}</span> ${nextName(o.month, k).toLowerCase()}da`).join(' + ');
+  const th = (t, tip) => `<th class="px-2 font-semibold" title="${tip}">${t}</th>`;
+  return salesKanban(list) + `<details class="mt-6"><summary class="cursor-pointer text-sm text-muted hover:text-fg mb-3">Batafsil: har oy leadlari keyin qachon sotib olgan</summary>` + card(h3(`Leadlar qachon sotuvga aylanadi${S.source ? ' — ' + esc(S.source) : ''}`, "Har qator — bir oyda kelgan leadlar. <b>Shu oyda sotildi</b> — o'sha oyning o'zida sotib olganlar. <b>Keyingi oyga o'tdi</b> — o'sha oyda sotilmagan va yopilmagan leadlar (keyingi oylarda sotilganlar + hali jarayondagilar). <b>Keyingi oylarda sotildi</b> — o'sha leadlardan keyingi oylarda sotib olganlar. <b>Jami sotuv</b> = shu oyda + keyingi oylarda.") +
+    `<div class="overflow-x-auto -mx-2"><table class="w-full text-sm border-separate" style="border-spacing:0"><thead><tr class="text-xs text-muted align-bottom">
+      <th class="text-left px-2 py-2 font-semibold">Lead kelgan oy</th><th class="text-right px-2 font-semibold">Leadlar</th>${th('Shu oyda sotildi', "Lead kelgan oyning o'zida sotib olganlar")}${th("Keyingi oyga o'tdi", "Oy oxirigacha sotilmagan va yopilmagan leadlar")}${th('Keyingi oylarda sotildi', "Shu oy leadlaridan keyingi oylarda sotib olganlar")}${th('Jami sotuv', "Shu oyda + keyingi oylarda")}
+      <th class="px-2 font-semibold">Shu oyning o'zida</th><th class="px-2 font-semibold">1 oydan keyin</th><th class="px-2 font-semibold">2 oydan keyin</th><th class="px-2 font-semibold">3+ oydan keyin</th></tr></thead>
+      <tbody>${list.map(o => `<tr><td class="px-2 py-1 font-semibold whitespace-nowrap">${name(o.month)} ${o.month.slice(0, 4)}</td><td class="px-2 text-right tabular-nums">${num(o.leads)}</td>
+        <td class="px-2">${bar(o.won_same_month, mx(x => x.won_same_month), 'green')}</td><td class="px-2">${bar(carried(o), mx(carried), 'amber')}</td>
+        <td class="px-2">${bar(o.won_later, mx(x => x.won_later), 'teal')}</td><td class="px-2">${bar(o.won, mx(x => x.won), 'green', `${o.won} · ${pct(div(o.won, o.leads))}`)}</td>
+        ${[0, 1, 2, 3].map(k => cell(o, k)).join('')}</tr>
+        <tr><td></td><td colspan="9" class="px-2 pb-3 text-[11px] text-muted">Jami ${o.won} ta sotuv = ${split(o) || '0'}. Keyingi oyga o'tgan ${num(carried(o))} tadan ${o.won_later} tasi keyin sotib oldi, ${num(o.still_open)} tasi hali jarayonda.</td></tr>`).join('')}</tbody></table></div>` +
+    `<p class="text-xs text-muted mt-2">«Sotuv» — Bitrix'da «Сделка успешна» bo'lgan deal. Iyuldan oldingi oylar to'liq yuklanmagan.</p>`) + '</details>';
+}
+
+function creatives() {
+  const d = S.data, A = S.ad, fx = +d.cfg?.fx_rate || 0;
+  const cat = Object.fromEntries(d.adCatalog.map(a => [a.id, a]));
+  const keyOf = id => { const a = cat[id] || {}; return A.level === 'ad' ? id : A.level === 'adset' ? (a.adset || '—') : (a.campaign || '—'); };
+  const by = {};
+  const get = id => { const k = keyOf(id), a = cat[id] || {}; return by[k] ??= { key: k, name: A.level === 'ad' ? (a.name || id) : k, thumb: A.level === 'ad' ? a.thumb : null, adset: a.adset, campaign: a.campaign, branch: a.branch, active: false, spend: 0, impr: 0, clicks: 0, mleads: 0, leads: 0, qual: 0, won: 0, revenue: 0 }; };
+  for (const r of d.adDaily) { const o = get(r.ad_id); o.spend += +r.spend; o.impr += +r.impressions; o.clicks += +r.clicks; o.mleads += +(r.results ?? r.leads); }
+  for (const r of d.adLeads) { const o = get(r.ad_id); o.leads += +r.leads; o.qual += +r.qual; o.won += +r.won; o.revenue += +r.revenue; }
+  for (const a of d.adCatalog) if (a.status === 'ACTIVE' && by[keyOf(a.id)]) by[keyOf(a.id)].active = true;
+  let rows = Object.values(by).filter(o => o.spend > 0 || o.leads > 0);
+  const counts = { active: rows.filter(o => o.active).length, paused: rows.filter(o => !o.active).length, all: rows.length };
+  if (A.status !== 'all') rows = rows.filter(o => A.status === 'active' ? o.active : !o.active);
+  if (A.q) { const t = A.q.toLowerCase(); rows = rows.filter(o => [o.name, o.adset, o.campaign].some(x => String(x || '').toLowerCase().includes(t))); }
+  if (!S.sort[CREATIVE_KEY]) rows.sort((a, b) => b.spend - a.spend);
+  const T = rows.reduce((t, o) => { for (const k of ['spend', 'impr', 'clicks', 'mleads', 'leads', 'qual', 'won', 'revenue']) t[k] += o[k]; return t; }, { _foot: true, name: 'Jami', spend: 0, impr: 0, clicks: 0, mleads: 0, leads: 0, qual: 0, won: 0, revenue: 0 });
+  const m = o => ({ ctr: div(o.clicks, o.impr), cpc: div(o.spend, o.clicks), cpm: o.impr ? o.spend / o.impr * 1000 : null, cpl: div(o.spend, o.mleads), cpql: div(o.spend, o.qual), cps: div(o.spend, o.won), roas: fx && o.spend ? o.revenue / (o.spend * fx) : null });
+  const avgCpql = m(T).cpql;
+  const seg = (items, cur, set) => `<div class="inline-flex p-1 bg-surface2 rounded-xl text-xs font-semibold">${items.map(([k, t]) => `<button onclick="${set.replace('$', k)}" class="px-3 h-7 rounded-lg ${cur === k ? 'bg-surface shadow-sm text-fg' : 'text-muted hover:text-fg'}">${t}</button>`).join('')}</div>`;
+  const usd = n => adMoney(n, false);
+  const cols = [
+    { t: A.level === 'ad' ? "E'lon" : A.level === 'adset' ? 'Adset' : 'Kampaniya', s: o => o.name, f: o => o._foot ? '<b>Jami</b>' : `<div class="flex items-center gap-3">${A.level === 'ad' ? (o.thumb ? `<img src="${esc(o.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="w-12 h-12 rounded-lg object-cover bg-surface2 shrink-0" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'w-12 h-12 rounded-lg bg-surface2 shrink-0'}))">` : '<div class="w-12 h-12 rounded-lg bg-surface2 shrink-0 grid place-items-center text-muted"><i class="ph ph-image"></i></div>') : ''}<div class="max-w-[260px] min-w-0"><div class="font-semibold truncate" title="${esc(o.name)}">${esc(o.name)}</div><div class="text-[11px] text-muted truncate">${o.active ? '<span style="color:rgb(var(--c-green))">● Faol</span>' : "<span>○ To'xtagan</span>"}${A.level === 'ad' ? ' · ' + esc(o.adset || '') : ''}</div></div></div>` },
+    { t: 'Xarajat', r: 1, s: o => o.spend, f: o => usd(o.spend) },
+    { t: 'Ko\'rishlar', r: 1, s: o => o.impr, f: o => num(o.impr) },
+    { t: 'CTR', r: 1, s: o => m(o).ctr ?? -1, f: o => pct(m(o).ctr) },
+    { t: 'CPC', r: 1, s: o => m(o).cpc ?? 1e9, f: o => usd(m(o).cpc) },
+    { t: 'CPM', r: 1, s: o => m(o).cpm ?? 1e9, f: o => usd(m(o).cpm) },
+    { t: 'Natija (Meta)', r: 1, s: o => o.mleads, f: o => num(o.mleads) },
+    { t: 'CPL', r: 1, s: o => m(o).cpl ?? 1e9, f: o => usd(m(o).cpl) },
+    { t: 'Lead (Bitrix)', r: 1, s: o => o.leads, f: o => num(o.leads) },
+    { t: 'Sifatli', r: 1, s: o => o.qual, f: o => `${num(o.qual)} <span class="text-[11px] text-muted">${pct(div(o.qual, o.leads))}</span>` },
+    { t: 'CPQL', r: 1, s: o => m(o).cpql ?? 1e9, f: o => o._foot || m(o).cpql == null ? usd(m(o).cpql) : chip(usd(m(o).cpql), m(o).cpql <= avgCpql ? 'success' : 'danger') },
+    { t: 'Sotuv', r: 1, s: o => o.won, f: o => num(o.won) },
+    { t: 'Sotuv narxi', r: 1, s: o => m(o).cps ?? 1e9, f: o => usd(m(o).cps) },
+    { t: 'ROAS', r: 1, s: o => m(o).roas ?? -1, f: o => m(o).roas == null ? '—' : m(o).roas.toFixed(2) + '×' },
+  ];
+  const more = rows.length > A.limit ? `<div class="mt-4 flex items-center gap-3"><button onclick="S.ad.limit+=20;render()" class="h-9 px-4 rounded-xl bg-surface2 text-sm font-semibold">Yana 20 ta</button><span class="text-xs text-muted">${A.limit} / ${rows.length} ko'rsatildi</span></div>` : '';
+  return card(`<div class="flex flex-wrap items-center gap-3 mb-4">
+      ${seg([['active', `Faol ${counts.active}`], ['paused', `To'xtagan ${counts.paused}`], ['all', `Hammasi ${counts.all}`]], A.status, "S.ad.status='$';S.ad.limit=20;render()")}
+      ${seg([['ad', "E'lonlar"], ['adset', 'Adsetlar'], ['campaign', 'Kampaniyalar']], A.level, "S.ad.level='$';S.ad.limit=20;render()")}
+      <input value="${esc(A.q)}" placeholder="Qidirish…" onchange="S.ad.q=this.value;S.ad.limit=20;render()" class="h-9 px-3 rounded-xl bg-surface2 border border-line text-sm w-full sm:w-56 ml-auto">
+    </div>` + h3('Kreativlar samaradorligi', `CTR = klik / ko'rish · CPC = klik narxi · CPM = 1000 ko'rish narxi · CPL = Meta natija narxi · CPQL = sifatli lead narxi (o'rtachadan arzon — sariq) · ROAS = tushum / xarajat. Ustun nomini bosing — saralanadi.`) +
+    table(cols, rows, T, A.limit) + more);
+}
+const CREATIVE_KEY = "E'lon|Xarajat|Ko'rishlar|CTR|CPC|CPM|Lead (Meta)|CPL|Lead (Bitrix)|Sifatli|CPQL|Sotuv|Sotuv narxi|ROAS";
+
+// Objections heard in analysed calls of the selected dates, with how often such calls still ended booked.
+function callObjections() {
+  const ok = analysed(), by = {};
+  for (const c of ok) for (const o of new Set((c.objections || []).map(x => x.toLowerCase().trim()))) { const r = by[o] ??= { o, n: 0, booked: 0 }; r.n++; r.booked += c.outcome === 'yozildi'; }
+  const rows = Object.values(by).sort((a, b) => b.n - a.n).slice(0, 12);
+  if (!rows.length) return '';
+  return card(h3("Qo'ng'iroqlardagi e'tirozlar", `${num(ok.length)} ta tahlil qilingan qo'ng'iroqdan (tanlangan davr). «Yozildi» — e'tirozga qaramay sinov darsiga yozilganlar ulushi`) + table([
+    { t: "E'tiroz", f: r => esc(r.o) }, { t: "Qo'ng'iroq", r: 1, f: r => bar(r.n, rows[0].n, 'rose', num(r.n)) }, { t: 'Yozildi', r: 1, f: r => pct(r.booked / r.n) },
+  ], rows), 'mb-6');
+}
+function pains() {
+  const d = S.data;
+  // Pains = why the parent wants the course, as heard in analysed calls; "yozildi" share shows which pains convert.
+  const by = {}, withPains = analysed().filter(c => (c.pains || []).length);
+  for (const c of withPains) for (const p of new Set(c.pains.map(x => x.toLowerCase().trim()))) { const o = by[p] ??= { p, n: 0, booked: 0 }; o.n++; o.booked += c.outcome === 'yozildi'; }
+  const list = Object.values(by).sort((a, b) => b.n - a.n);
+  const obj = d.objections.filter(match);
+  const objBy = {}; for (const r of obj) objBy[r.objection] = (objBy[r.objection] || 0) + +r.lost_deals;
+  const lost = Object.values(objBy).reduce((a, b) => a + b, 0), price = objBy.price || 0;
+  const known = lost - (objBy.unknown || 0);
+  const verdict = known < 10 ? chip("Hukm uchun tahlil qilingan qo'ng'iroq kam (<10)") : div(price, known) >= 0.4 ? chip('Narxga sezgir — narx/to\'lov taklifi', 'warn') : chip("Og'riqqa asoslangan taklif", 'success');
+  const OBJ = { price: 'Narx', time: 'Vaqt', trust: 'Ishonch', think_later: "O'ylab ko'raman", consult_family: 'Oila bilan maslahat', competitor: 'Raqobatchi', none: "Yo'q", unknown: "Tahlil qilinmagan" };
+  return callObjections() + leadReasons() + `<div class="grid lg:grid-cols-3 gap-6">
+    ${card(h3("Top og'riqlar", `Ota-ona nega farzandini kursga bermoqchi — ${num(withPains.length)} ta tahlil qilingan qo'ng'iroqdan. «Yozildi» — shu og'riq aytilgan qo'ng'iroqlardan sinov darsiga yozilganlar ulushi. Reklama matni uchun eng kuchli og'riqlarni oling.`) + (list.length ? table([
+      { t: "Og'riq", f: o => esc(o.p) }, { t: "Qo'ng'iroq", r: 1, s: o => o.n, f: o => bar(o.n, list[0].n, 'violet', num(o.n)) }, { t: 'Yozildi', r: 1, s: o => div(o.booked, o.n), f: o => pct(div(o.booked, o.n)) },
+    ], list.slice(0, 12)) : empty("AI qo'ng'iroqlardan og'riqlarni yig'moqda: har yangi tahlil bilan bu ro'yxat to'ladi.")), 'lg:col-span-2')}
+    ${card(h3("E'tirozlar", "Yo'qotilgan deallar") + `<div class="mb-4">${verdict}</div>` + (lost ? `<div class="space-y-2">${Object.entries(objBy).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<div class="text-sm"><div class="flex justify-between"><span>${OBJ[k] || esc(k)}</span><span class="tabular-nums text-muted">${n}</span></div><div class="h-1.5 bg-surface2 rounded-full mt-1"><div class="h-1.5 bg-accent rounded-full" style="width:${(n / lost * 100).toFixed(0)}%"></div></div></div>`).join('')}</div>` : empty("Yo'qotilgan deal yo'q")))}
+  </div>`;
+}
+
+// Lead loss reasons from Bitrix statuses: CRM-side objections, available without call analysis.
+function leadReasons() {
+  const d = S.data, outBy = {}; let outAll = 0;
+  for (const r of d.outcomes.filter(match)) { outAll += +r.leads; (outBy[r.status_name] ??= { name: r.status_name, outcome: r.outcome, n: 0 }).n += +r.leads; }
+  const outList = Object.values(outBy).sort((a, b) => b.n - a.n);
+  const OUT_TONE = { qual: 'success', lost: 'danger', open: 'info' }, OUT_LBL = { qual: 'sifatli', lost: "yo'qotilgan", open: 'jarayonda' };
+  const reasons = card(h3("Leadlar natijasi (Bitrix stadiyalari)", `${num(outAll)} ta lead, tanlangan davr. Yo'qotish sabablari menejer belgilagan stadiyadan.`) +
+    (outList.length ? `<div class="space-y-2.5">${outList.map(o => `<div class="text-sm"><div class="flex justify-between gap-3"><span class="min-w-0 truncate">${esc(o.name)} ${chip(OUT_LBL[o.outcome], OUT_TONE[o.outcome])}</span><span class="tabular-nums text-muted whitespace-nowrap">${num(o.n)} · ${pct(div(o.n, outAll))}</span></div><div class="h-1.5 bg-surface2 rounded-full mt-1"><div class="h-1.5 rounded-full ${o.outcome === 'qual' ? 'bg-success' : o.outcome === 'lost' ? 'bg-danger/70' : 'bg-info/70'}" style="width:${(o.n / outList[0].n * 100).toFixed(0)}%"></div></div></div>`).join('')}</div>` : empty("Lead yo'q")), 'mb-6');
+  return reasons;
+}
+
+// All leads, stage by stage: lead statuses, then deal stages (C47 pipeline).
+const STEPS = [['leads', 'Leadlar'], ['contacted', 'Aloqa qilindi'], ['qual', 'Sifatli'], ['deals', 'Deal ochildi'], ['came_to_branch', 'Filialga keldi'], ['won', 'Sotuv']];
+// What each funnel step counts (shown under the step name).
+const STEP_INFO = {
+  leads: "Bitrix'ga tushgan barcha leadlar",
+  contacted: "Gaplashilgan: status yangi, propushniy yoki «bog'lanib bo'lmadi» emas",
+  qual: "Status «Качественный лид»",
+  deals: "Leaddan sdelka ochilgan",
+  came_to_branch: "Sdelka «Filialga keldi» yoki undan keyingi bosqichda",
+  won: "Sdelka hozir «To'lov qildi», «Nabor guruh» yoki «Сделка успешна»da",
+};
+function sumBy(rows, keyFn) {
+  const by = {};
+  for (const r of rows) {
+    const k = keyFn(r); if (k == null) continue;
+    const o = by[k] ??= { key: k, revenue: 0, deal_lost: 0, ...Object.fromEntries(STEPS.map(([s]) => [s, 0])) };
+    for (const [s] of STEPS) o[s] += +r[s];
+    o.revenue += +r.revenue; o.deal_lost += +r.deal_lost;
+  }
+  return Object.values(by);
+}
+const stepCell = (o, i) => { const v = o[STEPS[i][0]], prev = i ? o[STEPS[i - 1][0]] : null; return `${num(v)}${i ? `<div class="text-[10px] text-muted">${pct(div(v, prev))}</div>` : ''}`; };
+function funnel() {
+  const rows = S.data.sales.filter(match);
+  const [t] = sumBy(rows, () => 'all');
+  if (!t) return card(empty("Lead yo'q"));
+  // Widths follow the square root of the share so the small bottom steps stay readable; exact numbers are printed.
+  const COLORS = ['blue', 'violet', 'teal', 'violet', 'amber', 'green'];
+  const bars = STEPS.map(([s, l], i) => {
+    const v = t[s], prev = i ? t[STEPS[i - 1][0]] : v, conv = div(v, prev), weak = i && conv != null && conv < 0.5, share = div(v, t.leads) || 0;
+    const w = Math.max(Math.sqrt(share) * 100, 14).toFixed(1);
+    const step = i ? `<div class="flex justify-center my-1"><span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold tabular-nums ${weak ? 'bg-danger/10 text-danger' : 'bg-surface2 text-muted'}"><i class="ph-bold ph-arrow-down"></i>${pct(conv)} o'tdi</span></div>` : '';
+    return step + `<div class="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] items-center gap-3 sm:gap-5">
+      <div class="min-w-0"><div class="text-sm font-semibold">${l}</div><div class="text-[11px] text-muted leading-snug">${STEP_INFO[s]}</div></div>
+      <div class="flex justify-center"><div class="h-11 rounded-xl flex items-center justify-center text-white font-bold tabular-nums text-[15px] shadow-sm" style="width:${w}%;background:linear-gradient(90deg, rgb(var(--c-${COLORS[i]}) / .85), rgb(var(--c-${COLORS[i]})))">${num(v)}</div></div>
+      <div class="text-right"><div class="text-sm font-semibold tabular-nums">${pct(share)}</div><div class="text-[11px] text-muted">jami leaddan</div></div></div>`;
+  }).join('');
+  const cols = name => [{ t: name, f: o => `<span class="font-semibold">${esc(o.key)}</span>` }, ...STEPS.map(([, l], i) => ({ t: l, r: 1, f: o => stepCell(o, i) })),
+    { t: 'Lead→sotuv', r: 1, s: o => div(o.won, o.leads) ?? -1, f: o => chip(pct(div(o.won, o.leads)), div(o.won, o.leads) >= div(t.won, t.leads) ? 'success' : 'danger') }, { t: 'Tushum', r: 1, f: o => money(o.revenue) }];
+  const byOp = sumBy(rows, r => r.operator || "Mas'ul yo'q").filter(o => o.leads >= 20).sort((a, b) => b.leads - a.leads);
+  const dealCols = name => [{ t: name, f: o => `<span class="font-semibold">${esc(o.key)}</span>` }, ...STEPS.slice(3).map(([, l], j) => ({ t: l, r: 1, f: o => stepCell(o, j + 3) })),
+    { t: "Deal yo'qotildi", r: 1, f: o => num(o.deal_lost) }, { t: 'Deal→sotuv', r: 1, s: o => div(o.won, o.deals) ?? -1, f: o => pct(div(o.won, o.deals)) }, { t: 'Tushum', r: 1, f: o => money(o.revenue) }];
+  const byBranch = sumBy(rows.filter(r => r.deal_manager_id), r => r.deal_branch || 'Filial belgilanmagan').sort((a, b) => b.deals - a.deals);
+  const byMgr = sumBy(rows.filter(r => r.deal_manager_id), r => r.deal_manager).filter(o => o.deals >= 5).sort((a, b) => b.won - a.won);
+  return card(h3('Umumiy voronka', `Tanlangan davrda (${fmtDay(S.from)}${S.from !== S.to ? ' — ' + fmtDay(S.to) : ''}) kelgan barcha leadlar. Bosqichlar orasidagi raqam — oldingi bosqichdan o'tganlar ulushi, 50% dan past bo'lsa qizil.`) + `<div>${bars}</div>`, 'mb-6') +
+    stageCards() +
+    card(h3("Lead stadiyasi bo'yicha konversiya", "Hozir shu stadiyada turgan leadlar: ulardan nechtasi sotuvga aylangan, jarayonda, deal yopilgan yoki sifatsiz.") + outcomeTable('Stadiya', groupSum(S.data.statusOut, r => r.status_name).map(o => ({ ...o, sort: Math.min(...S.data.statusOut.filter(r => r.status_name === o.key).map(r => r.sort)) })).sort((a, b) => a.sort - b.sort), r => `<span class="font-semibold">${esc(r.key)}</span>`), 'mb-6') +
+    card(h3("Operatorlar (kim gaplashgan)", "Lead egasi (call-markaz). Ustun nomini bosing — eng yuqori/past konversiya.") + outcomeTable('Operator', groupSum(S.data.operators, r => r.operator).filter(o => o.leads >= 20).sort((a, b) => b.leads - a.leads), r => `<span class="font-semibold">${esc(r.key)}</span>`), 'mb-6') +
+    card(h3('Filiallar', "Deal egasi ismidagi filial nomidan (masalan «|| Xadra»).") + table(dealCols('Filial'), byBranch), 'mb-6') +
+    card(h3('Filial menejerlari', 'Kamida 5 ta deal') + table(dealCols('Menejer'), byMgr), 'mb-6') +
+    leadReasons() +
+    `<p class="text-xs text-muted">Yo'qotilgan deal qaysi bosqichda yopilgani Bitrix'da saqlanmaydi, shuning uchun u faqat «Deal ochildi»da hisoblanadi.</p>`;
+}
+
+// Every Bitrix stage (lead statuses and C47 deal stages) in kanban order.
+const stageRow = (name, n, total, extra = '', tone = 'violet') => `<div class="text-sm"><div class="flex justify-between gap-3"><span class="min-w-0 truncate">${esc(name)}</span><span class="tabular-nums whitespace-nowrap">${num(n)} <span class="text-xs text-muted">· ${pct(div(n, total))}${extra}</span></span></div><div class="h-1.5 bg-surface2 rounded-full mt-1"><div class="h-1.5 rounded-full" style="width:${Math.max(div(n, total) * 100, 0.5).toFixed(1)}%;background:rgb(var(--c-${tone}) / .7)"></div></div></div>`;
+function stageCards() {
+  const d = S.data, by = {}; let all = 0;
+  for (const r of d.outcomes.filter(match)) { all += +r.leads; (by[r.status_name] ??= { name: r.status_name, sort: r.sort, outcome: r.outcome, n: 0 }).n += +r.leads; }
+  const ls = Object.values(by).sort((a, b) => a.sort - b.sort);
+  const TONE_BAR = { qual: 'green', lost: 'rose', open: 'amber' }, LBL = { qual: 'sifatli', lost: 'yopilgan', open: 'jarayonda' };
+  const passed = o => o.outcome === 'lost' ? null : ls.filter(x => x.sort >= o.sort).reduce((a, x) => a + x.n, 0);
+  const maxN = Math.max(1, ...ls.map(o => o.n));
+  const leadRows = [{ name: 'Jami leadlar', n: all, total: true }, ...ls];
+  const leadTable = table([
+    { t: 'Stadiya', s: o => o.sort ?? -1, f: o => o.total ? '<b>Jami leadlar</b>' : `<span class="inline-flex items-center gap-2"><i class="w-2 h-2 rounded-full" style="background:rgb(var(--c-${TONE_BAR[o.outcome]}))"></i>${esc(o.name)}</span>` },
+    { t: 'Turi', f: o => o.total ? '' : `<span class="text-xs text-muted">${LBL[o.outcome]}</span>` },
+    { t: 'Hozir shu yerda', r: 1, s: o => o.n, f: o => o.total ? `<b>${num(o.n)}</b>` : bar(o.n, maxN, TONE_BAR[o.outcome]) },
+    { t: 'Jamidan %', r: 1, s: o => div(o.n, all), f: o => pct(div(o.n, all)) },
+    { t: "Kamida shu yergacha kelgan", r: 1, s: o => o.total ? all : passed(o) ?? -1, f: o => o.total ? num(all) : passed(o) == null ? '<span class="text-muted">—</span>' : num(passed(o)) },
+    { t: 'Shundan, jamidan %', r: 1, s: o => o.total ? 1 : div(passed(o), all) ?? -1, f: o => o.total ? '100%' : passed(o) == null ? '' : pct(div(passed(o), all)) },
+  ], leadRows);
+  const ds = {}; let dAll = 0;
+  for (const r of d.dealStages) { dAll += +r.deals; (ds[r.stage] ??= { name: r.stage_name, sort: r.sort, stage: r.stage, n: 0 }).n += +r.deals; }
+  const dl = Object.values(ds).sort((a, b) => a.sort - b.sort), isLost = x => /LOSE$/.test(x.stage);
+  // Reached = deals now at this stage or later (lost deals excluded: their last stage is unknown).
+  const reached = x => isLost(x) ? null : dl.filter(y => !isLost(y) && y.sort >= x.sort).reduce((a, y) => a + y.n, 0);
+  const open = dl.filter(x => !isLost(x)), prevOf = x => open[open.indexOf(x) - 1];
+  const maxD = Math.max(1, ...dl.map(o => o.n));
+  const dealTable = table([
+    { t: 'Deal stadiyasi', s: o => o.sort, f: o => o.total ? '<b>Jami deallar</b>' : esc(o.name) },
+    { t: 'Hozir shu yerda', r: 1, s: o => o.n, f: o => o.total ? `<b>${num(o.n)}</b>` : bar(o.n, maxD, isLost(o) ? 'rose' : /WON$/.test(o.stage) ? 'green' : 'violet') },
+    { t: 'Jamidan %', r: 1, s: o => div(o.n, dAll), f: o => pct(div(o.n, dAll)) },
+    { t: 'Shu bosqichga yetgan', r: 1, s: o => reached(o) ?? -1, f: o => o.total ? num(dAll) : reached(o) == null ? '<span class="text-muted">—</span>' : num(reached(o)) },
+    { t: "Oldingi bosqichdan o'tish", r: 1, s: o => { const p = prevOf(o); return p ? div(reached(o), reached(p)) ?? -1 : -1; }, f: o => { const p = !o.total && !isLost(o) && prevOf(o); return p ? chip(pct(div(reached(o), reached(p))), div(reached(o), reached(p)) >= 0.5 ? 'success' : 'danger') : ''; } },
+  ], [{ name: 'Jami', n: dAll, total: true, sort: -1, stage: '' }, ...dl]);
+  return card(h3('Lead stadiyalari', `${num(all)} ta lead. <b>Hozir shu yerda</b> — lead aynan hozir shu statusda turibdi. <b>Kamida shu yergacha kelgan</b> — Bitrix'dagi statuslar tartibida shu status va undan keyingi barcha statuslardagi leadlar yig'indisi, ya'ni bu bosqichdan o'tib ketganlar ham kiradi. Masalan, «Qayta aloqa» qatoridagi son = hozir «Qayta aloqa», «Qaytgan lidlar», «Качественный лид» va undan keyingi (yopilgan) statuslardagi leadlar. Yopilgan statuslar (SPAM, Dublikat…) uchun «—»: lead qaysi bosqichda yopilgani Bitrix'da saqlanmaydi.`) + leadTable, 'mb-6') +
+    card(h3('Deal stadiyalari', `${num(dAll)} ta deal. Yo'qotilgan deal qaysi bosqichda yopilgani Bitrix'da saqlanmaydi, shuning uchun u «yetgan»ga qo'shilmaydi.`) + dealTable, 'mb-6');
+}
+
+// When leads arrive and from which phone operator codes (Tashkent time).
+const OPERATORS = { 90: 'Beeline', 91: 'Beeline', 92: 'Beeline', 20: 'Beeline (OQ)', 93: 'Ucell', 94: 'Ucell', 50: 'Ucell', 97: 'Mobiuz', 88: 'Mobiuz', 87: 'Mobiuz',
+  99: 'Uzmobile', 77: 'Uzmobile', 95: 'Uzmobile', 70: 'Uzmobile', 55: 'Uzmobile', 33: 'Humans', 98: 'Perfectum', 80: 'Perfectum' };
+const operatorOf = code => OPERATORS[code] || (code === "yo'q" ? "Raqam yo'q" : code === 'boshqa' ? "Xorijiy / noto'g'ri format" : "Noma'lum kod");
+function leads() {
+  const H = S.data.hours, C = S.data.codes;
+  const total = H.reduce((a, r) => a + +r.leads, 0);
+  if (!total) return card(empty("Tanlangan davrda lead yo'q"));
+  const add = (o, r) => { o.leads += +r.leads; o.qual += +r.qual; o.won += +r.won; o.unreached += +r.unreached; return o; };
+  const blank = key => ({ key, leads: 0, qual: 0, won: 0, unreached: 0 });
+  const hours = Array.from({ length: 24 }, (_, h) => blank(h));
+  for (const r of H) add(hours[r.hour], r);
+  const maxH = Math.max(...hours.map(o => o.leads)), avgQual = div(hours.reduce((a, o) => a + o.qual, 0), total);
+  const bars = hours.map(o => { const qr = div(o.qual, o.leads);
+    return `<div class="flex flex-col items-center gap-0.5 min-w-0" title="${o.key}:00–${o.key}:59 — ${o.leads} lead, ${o.qual} sifatli (${pct(qr)})"><div class="text-[9px] tabular-nums">${o.leads || ''}</div><div class="text-[9px] tabular-nums ${qr != null && qr >= avgQual ? 'text-success' : 'text-muted'}">${o.leads ? Math.round(qr * 100) + '%' : ''}</div><div class="w-full bg-surface2 rounded-t h-28 flex items-end"><div class="w-full rounded-t ${qr != null && qr >= avgQual ? 'bg-success' : 'bg-info/70'}" style="height:${(o.leads / maxH * 100).toFixed(0)}%"></div></div><div class="text-[10px] text-muted">${o.key}</div></div>`; }).join('');
+  // Weekday × hour heatmap (weekday from the Tashkent date).
+  const cell = {}; let maxC = 0;
+  for (const r of H) { const k = ((new Date(r.day + 'T00:00').getDay() + 6) % 7) + '-' + r.hour; cell[k] = (cell[k] || 0) + +r.leads; maxC = Math.max(maxC, cell[k]); }
+  const DOW = ['Du', 'Se', 'Ch', 'Pa', 'Ju', 'Sh', 'Ya'];
+  const heat = `<div class="overflow-x-auto"><table class="text-[10px] border-separate" style="border-spacing:2px"><thead><tr><th></th>${hours.map(o => `<th class="text-muted font-normal w-6">${o.key}</th>`).join('')}</tr></thead><tbody>${DOW.map((d, i) => `<tr><td class="pr-2 text-muted">${d}</td>${hours.map(o => { const v = cell[i + '-' + o.key] || 0; return `<td class="w-6 h-6 rounded text-center tabular-nums" title="${d} ${o.key}:00 — ${v} lead" style="background:rgb(var(--accent) / ${(v / maxC * 0.9).toFixed(2)})">${v >= maxC * 0.6 ? v : ''}</td>`; }).join('')}</tr>`).join('')}</tbody></table></div>`;
+  const rateCols = name => [
+    { t: 'Leadlar', r: 1, f: o => num(o.leads) }, { t: 'Ulushi', r: 1, f: o => pct(div(o.leads, total)), s: o => o.leads },
+    { t: 'Sifatli', r: 1, f: o => num(o.qual) }, { t: 'Sifat %', r: 1, f: o => chip(pct(div(o.qual, o.leads)), div(o.qual, o.leads) >= avgQual ? 'success' : 'danger'), s: o => div(o.qual, o.leads) ?? -1 },
+    { t: 'Sotuv', r: 1, f: o => num(o.won) }, { t: 'Sotuv %', r: 1, f: o => pct(div(o.won, o.leads)), s: o => div(o.won, o.leads) ?? -1 },
+    { t: "Bog'lanib bo'lmadi", r: 1, f: o => pct(div(o.unreached, o.leads)), s: o => div(o.unreached, o.leads) ?? -1 }];
+  const codes = {}; for (const r of C) add(codes[r.phone_code] ??= blank(r.phone_code), r);
+  const ops = {}; for (const o of Object.values(codes)) { const k = operatorOf(o.key); add(ops[k] ??= blank(k), o); }
+  const peak = [...hours].sort((a, b) => b.leads - a.leads).slice(0, 3).map(o => o.key + ':00').join(', ');
+  return leadFindings(hours, H, ops, total, avgQual) + card(h3("Leadlar soat bo'yicha (Toshkent vaqti)", `${num(total)} ta lead. Eng ko'p: ${peak}. Ustun ustida: lead soni va sifatli ulushi. Yashil — sifat o'rtachadan (${pct(avgQual)}) yuqori.`) + `<div class="grid gap-0.5" style="grid-template-columns:repeat(24,minmax(0,1fr))">${bars}</div>`, 'mb-6') +
+    card(h3('Har bir soat batafsil', "Ustun nomini bosing — eng yuqori/eng past bo'yicha saralanadi") + table([{ t: 'Soat', f: o => `${String(o.key).padStart(2, '0')}:00–${String(o.key).padStart(2, '0')}:59` }, ...rateCols()], hours.filter(o => o.leads)), 'mb-6') +
+    card(h3('Hafta kuni × soat', "Rang qanchalik to'q — shuncha ko'p lead. Katakka sichqonchani olib boring — aniq son.") + heat, 'mb-6') +
+    card(h3('Operatorlar', "Telefon kodi bo'yicha guruhlangan") + table([{ t: 'Operator', f: o => `<span class="font-semibold">${esc(o.key)}</span>` }, ...rateCols()], Object.values(ops).sort((a, b) => b.leads - a.leads)), 'mb-6') +
+    card(h3('Telefon kodlari', "Faqat kod saqlanadi (998 dan keyingi 2 raqam), to'liq raqam emas. «yo'q» — leadda raqam yo'q, «boshqa» — xorijiy yoki noto'g'ri yozilgan raqam.") + table([{ t: 'Kod', f: o => `<span class="font-semibold">${esc(o.key)}</span> <span class="text-xs text-muted">${operatorOf(o.key)}</span>` }, ...rateCols()], Object.values(codes).sort((a, b) => b.leads - a.leads)));
+}
+
+// What the hour/weekday/operator data says, each with the step that fixes it.
+function leadFindings(hours, H, ops, total, avgQual) {
+  const sum = (xs, k) => xs.reduce((a, o) => a + o[k], 0);
+  const night = hours.filter(o => o.key >= 20 || o.key < 9), day = hours.filter(o => o.key >= 9 && o.key < 20);
+  const nUnr = div(sum(night, 'unreached'), sum(night, 'leads')), dUnr = div(sum(day, 'unreached'), sum(day, 'leads'));
+  const nQual = div(sum(night, 'qual'), sum(night, 'leads')), dQual = div(sum(day, 'qual'), sum(day, 'leads'));
+  const rated = hours.filter(o => o.leads >= 8).map(o => ({ ...o, q: div(o.qual, o.leads) })).sort((a, b) => b.q - a.q);
+  const hh = o => `${String(o.key).padStart(2, '0')}:00`;
+  const wd = {}; for (const r of H) { const k = (new Date(r.day + 'T00:00').getDay() + 6) % 7; const o = wd[k] ??= { k, leads: 0, qual: 0 }; o.leads += +r.leads; o.qual += +r.qual; }
+  const DOW = ['Dushanba', 'Seshanba', 'Chorshanba', 'Payshanba', 'Juma', 'Shanba', 'Yakshanba'];
+  const wds = Object.values(wd).filter(o => o.leads >= 15).map(o => ({ ...o, q: div(o.qual, o.leads) })).sort((a, b) => b.q - a.q);
+  const opWorst = Object.values(ops).filter(o => o.leads >= 20).map(o => ({ ...o, u: div(o.unreached, o.leads) })).sort((a, b) => b.u - a.u)[0];
+  const items = [];
+  if (sum(night, 'leads') >= 10) items.push(['ph-moon', nUnr > dUnr ? 'rose' : 'teal', `Kechki leadlar (20:00–09:00): ${pct(div(sum(night, 'leads'), total))}`,
+    `Bog'lanib bo'lmadi: kechasi ${pct(nUnr)}, kunduzi ${pct(dUnr)}. Sifatli: kechasi ${pct(nQual)}, kunduzi ${pct(dQual)}.`,
+    nUnr > dUnr ? "Kechki leadlarga darhol avtomatik Telegram/SMS xabar yuboring («Ertalab 9:00 da qo'ng'iroq qilamiz») va ertalab birinchi soatda faqat ularga qo'ng'iroq qiling." : "Kechki leadlar kunduzgidan yomon emas — ertalab 9:00 dagi navbatni saqlang."]);
+  if (rated.length >= 4) items.push(['ph-clock', 'green', `Eng sifatli soatlar: ${rated.slice(0, 3).map(hh).join(', ')}`,
+    `Sifatli ulushi ${rated.slice(0, 3).map(o => pct(o.q)).join(', ')} (o'rtacha ${pct(avgQual)}). Eng past: ${rated.slice(-3).map(o => `${hh(o)} ${pct(o.q)}`).join(', ')}.`,
+    "Meta'da reklama jadvalini (ad scheduling, lifetime budget bilan) shu soatlarga ko'proq yo'naltiring; past soatlarda qo'ng'iroq qilish tezligini tekshiring."]);
+  if (wds.length >= 4) items.push(['ph-calendar', 'violet', `Eng yaxshi kun: ${DOW[wds[0].k]} (${pct(wds[0].q)}), eng yomoni: ${DOW[wds[wds.length - 1].k]} (${pct(wds[wds.length - 1].q)})`,
+    `Hafta kunlari bo'yicha sifatli lead ulushi.`, "Byudjetni yomon kunlarda biroz kamaytirib, yaxshi kunlarga o'tkazing; yomon kunda menejerlar soni yetarlimi — tekshiring."]);
+  if (opWorst && opWorst.u > 0) items.push(['ph-phone-x', 'amber', `Eng ko'p «bog'lanib bo'lmadi»: ${opWorst.key} raqamlari (${pct(opWorst.u)})`,
+    `${num(opWorst.leads)} ta lead shu operatordan.`, "Bu raqamlarga qo'ng'iroqdan oldin Telegram orqali yozish yoki boshqa vaqtda qayta urinish qoidasini qo'ying."]);
+  if (!items.length) return '';
+  return card(h3('Nima topildi va nima qilish kerak', "Avtomatik xulosa: tanlangan davrdagi leadlar soat, hafta kuni va telefon operatori bo'yicha.") +
+    `<div class="grid md:grid-cols-2 gap-3">${items.map(([icon, tone, title, fact, action]) => `<div class="rounded-2xl bg-surface2 p-4"><div class="flex items-center gap-2 text-[13px] font-semibold"><i class="ph-bold ${icon}" style="color:rgb(var(--c-${tone}))"></i>${title}</div><div class="text-[12px] text-muted mt-1">${fact}</div><div class="text-[12.5px] mt-2"><i class="ph-bold ph-arrow-right text-accent"></i> ${action}</div></div>`).join('')}</div>`, 'mb-6');
+}
+
+const WD = ['Ya', 'Du', 'Se', 'Ch', 'Pa', 'Ju', 'Sh'];
+function daily() {
+  const rows = S.data.daily;
+  if (!rows.length) return card(empty("Tanlangan davrda lead yo'q"));
+  const bySrc = groupSum(rows, r => r.source).sort((a, b) => b.leads - a.leads);
+  const [tot] = groupSum(rows, () => 'all');
+  const view = S.dailyView || 'src', picked = S.source;
+  const rate = (o, k) => div(o[k], o.leads);
+  // Findings only from sources with enough leads to mean something.
+  const big = bySrc.filter(o => o.leads >= 10);
+  const pick = (k, dir) => [...big].sort((a, b) => dir * ((rate(b, k) ?? -1) - (rate(a, k) ?? -1)))[0];
+  const finding = (icon, tone, title, o, k, what) => o ? `<div class="rounded-2xl bg-surface2 p-3.5"><div class="flex items-center gap-2 text-[12px] font-semibold" style="color:rgb(var(--c-${tone}))"><i class="ph-bold ${icon}"></i>${title}</div><div class="mt-1 text-[14px] font-semibold">${esc(o.key)} — ${pct(rate(o, k))}</div><div class="text-[11.5px] text-muted mt-0.5">o'rtacha ${pct(rate(tot, k))} · ${num(o.leads)} lead. ${what}</div></div>` : '';
+  const findings = big.length < 2 ? '' : `<div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+    ${finding('ph-star', 'teal', 'Eng sifatli manba', pick('qual', 1), 'qual', "Byudjet/e'tiborni shu manbaga ko'paytiring.")}
+    ${finding('ph-trophy', 'green', 'Sotuvga eng yaxshi', pick('won', 1), 'won', "Shu manba leadlariga birinchi navbatda qo'ng'iroq.")}
+    ${finding('ph-trash', 'rose', "Eng ko'p sifatsiz", pick('junk', 1), 'junk', "Forma savollari yoki auditoriyani tekshiring.")}
+    ${finding('ph-hourglass', 'amber', 'Eng ko\'p hal qilinmagan', pick('in_progress', 1), 'in_progress', "Bu leadlar hali ochiq — menejerlar qayta aloqa qilsin.")}</div>`;
+  const cell = (n, of) => `${num(n)} <span class="text-[11px] text-muted">${pct(div(n, of))}</span>`;
+  const cols = (label, keyCell) => [{ t: label, f: r => r._foot ? '<b>Jami</b>' : keyCell(r), s: r => r.key },
+    { t: 'Leadlar', r: 1, s: r => r.leads, f: r => num(r.leads) },
+    { t: 'Aloqa', r: 1, s: r => rate(r, 'contacted') ?? -1, f: r => cell(r.contacted, r.leads) },
+    { t: 'Sifatli', r: 1, s: r => rate(r, 'qual') ?? -1, f: r => r._foot ? cell(r.qual, r.leads) : `${num(r.qual)} ${chip(pct(rate(r, 'qual')), (rate(r, 'qual') ?? 0) >= (rate(tot, 'qual') ?? 0) ? 'success' : 'danger')}` },
+    { t: 'Filialga keldi', r: 1, s: r => r.came_to_branch, f: r => num(r.came_to_branch) },
+    { t: 'Sotuv', r: 1, s: r => rate(r, 'won') ?? -1, f: r => cell(r.won, r.leads) },
+    { t: 'Jarayonda', r: 1, s: r => r.in_progress, f: r => num(r.in_progress) },
+    { t: 'Sifatsiz', r: 1, s: r => rate(r, 'junk') ?? -1, f: r => cell(r.junk, r.leads) }];
+  const seg = `<div class="inline-flex p-1 bg-surface2 rounded-xl text-xs font-semibold">${[['src', 'Manbalar'], ['day', 'Kunlar']].map(([k, t]) => `<button onclick="S.dailyView='${k}';render()" class="px-3 h-7 rounded-lg ${view === k ? 'bg-surface shadow-sm text-fg' : 'text-muted hover:text-fg'}">${t}</button>`).join('')}</div>`;
+  const srcSelect = `<select onchange="S.source=this.value;render()" class="h-9 px-2 rounded-xl bg-surface2 border border-line text-sm"><option value="">Barcha manbalar</option>${bySrc.map(o => `<option ${o.key === picked ? 'selected' : ''} value="${esc(o.key)}">${esc(o.key)} (${num(o.leads)})</option>`).join('')}</select>`;
+  const body = view === 'src'
+    ? table(cols('Manba', r => `<button onclick="S.source='${esc(r.key).replace(/'/g, "\\'")}';S.dailyView='day';render()" class="font-semibold hover:text-accent text-left">${esc(r.key)}</button>`), bySrc, tot)
+    : (() => { const ds = groupSum(rows.filter(r => !picked || r.source === picked), r => r.day).sort((a, b) => b.key.localeCompare(a.key)); const [t2] = groupSum(rows.filter(r => !picked || r.source === picked), () => 'all');
+      return table(cols('Sana', r => `<span class="font-semibold tabular-nums">${r.key.slice(8)}.${r.key.slice(5, 7)}</span> <span class="text-xs text-muted">${WD[new Date(r.key + 'T00:00').getDay()]}</span>`), ds, t2); })();
+  return card(`<div class="flex flex-wrap items-center gap-3 mb-4">${seg}${view === 'day' ? srcSelect : ''}</div>` +
+    h3(view === 'src' ? 'Manbalar: qaysi kanal sifatli lead va sotuv beradi' : `Kunlar${picked ? ' — ' + esc(picked) : ''}: qaysi kun leadlari yaxshi ishlandi`,
+      "Lead kelgan kun bo'yicha. Foizlar — o'sha qatordagi leadlardan. Yashil/qizil — o'rtachadan yuqori/past. Manba nomini bosing — o'sha manbaning kunlari ochiladi.") + findings + body);
+}
+
+const moneyShort = n => n == null ? '—' : Math.abs(n) >= 1e9 ? (n / 1e9).toFixed(2) + ' mlrd' : Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(1) + ' mln' : num(n);
+function moneyPage() {
+  const d = S.data, days = d.cycle.map(r => +r.days).sort((a, b) => a - b);
+  const kpi = (l, v, sub, color) => `<div class="bg-surface border border-line rounded-2xl p-4 relative overflow-hidden"><div class="absolute inset-x-0 top-0 h-1" style="background:rgb(var(--c-${color}))"></div><div class="text-xs text-muted">${l}</div><div class="text-xl font-bold mt-1 tabular-nums">${v}</div>${sub ? `<div class="text-[11px] text-muted mt-0.5">${sub}</div>` : ''}</div>`;
+  const tot = d.money.reduce((a, r) => ({ deals: a.deals + +r.deals, won: a.won + +r.won, lost: a.lost + +r.lost, amount: a.amount + +r.amount, paid: a.paid + +r.paid_amount, rem: a.rem + +(r.remaining || 0) }), { deals: 0, won: 0, lost: 0, amount: 0, paid: 0, rem: 0 });
+  const q = f => days.length ? days[Math.min(days.length - 1, Math.floor(f * (days.length - 1)))] : null;
+  const avg = days.length ? days.reduce((a, b) => a + b, 0) / days.length : null;
+  const fmtD = v => v == null ? '—' : v < 1 ? Math.round(v * 24) + ' soat' : v.toFixed(1).replace('.0', '') + ' kun';
+  // Sales cycle: min / median / average / max as bars, plus a distribution.
+  const stats = [['Eng tez', q(0), 'green'], ['Mediana (yarmi shundan tez)', q(0.5), 'teal'], ["O'rtacha", avg, 'blue'], ['Eng uzoq', q(1), 'rose']];
+  const maxD = Math.max(1, ...stats.map(x => x[1] || 0));
+  const buckets = [['Shu kuni', 0, 1], ['1–3 kun', 1, 4], ['4–7 kun', 4, 8], ['8–14 kun', 8, 15], ['15–30 kun', 15, 31], ['31–60 kun', 31, 61], ['60+ kun', 61, 1e9]].map(([l, a, b]) => [l, days.filter(x => x >= a && x < b).length]);
+  const maxB = Math.max(1, ...buckets.map(b => b[1]));
+  const cum = []; buckets.reduce((acc, [, n]) => { cum.push(acc + n); return acc + n; }, 0);
+  const tile = (l, v, sub) => `<div class="rounded-xl bg-surface2 border border-line p-4"><div class="text-xs text-muted">${l}</div><div class="text-2xl font-bold tabular-nums mt-1">${v}</div><div class="text-[11px] text-muted mt-0.5">${sub}</div></div>`;
+  const cycleCard = card(h3('Sotuv sikli — leaddan sotuvgacha necha kun', `Tanlangan davrda kelgan leadlardan ${num(days.length)} ta sotuv. Hisob: lead tushgan kundan deal «Сделка успешна» bo'lgan kungacha.`) +
+    (days.length ? `<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">${tile('Mediana', fmtD(q(0.5)), 'sotuvlarning yarmi shundan tezroq')}${tile("O'rtacha", fmtD(avg), "uzoq sotuvlar o'rtachani oshiradi")}${tile('Eng tez', fmtD(q(0)), 'birinchi kunning o\'zida')}${tile('Eng uzoq', fmtD(q(1)), 'eng sekin sotuv')}</div>` +
+      table([
+        { t: 'Lead kelganidan keyin', f: o => `<b>${o.l}</b>` },
+        { t: 'Sotuvlar', r: 1, s: o => o.n, f: o => bar(o.n, maxB, 'violet') },
+        { t: 'Ulushi', r: 1, s: o => o.n, f: o => pct(div(o.n, days.length)) },
+        { t: 'Shu muddatgacha jami', r: 1, s: o => o.c, f: o => `${num(o.c)} <span class="text-xs text-muted">${pct(div(o.c, days.length))}</span>` },
+      ], buckets.map(([l, n], i) => ({ l, n, c: cum[i] })))
+      : empty("Tanlangan davr leadlaridan hali sotuv yo'q")), 'mb-6');
+  // Deals and money by stage.
+  const st = {}; for (const r of d.money) { const o = st[r.stage_name] ??= { key: r.stage_name, sort: r.sort, deals: 0, lost: 0, won: 0, amount: 0, paid: 0, rem: 0, wonAmount: 0, openAmount: 0 }; if (+r.won) o.wonAmount += +r.amount; else if (!+r.lost) o.openAmount += +r.amount; o.deals += +r.deals; o.lost += +r.lost; o.won += +r.won; o.amount += +r.amount; o.paid += +r.paid_amount; o.rem += +(r.remaining || 0); }
+  const stList = Object.values(st).sort((a, b) => a.sort - b.sort), mx = k => Math.max(0, ...stList.map(o => o[k]));
+  const stageTable = table([
+    { t: 'Deal stadiyasi', f: o => o._foot ? 'Jami' : `<span class="font-semibold">${esc(o.key)}</span>`, s: o => o.sort },
+    { t: 'Deallar', r: 1, s: o => o.deals, f: o => o._foot ? num(o.deals) : bar(o.deals, mx('deals'), 'blue') },
+    { t: 'Rad etildi', r: 1, s: o => o.lost, f: o => o._foot ? num(o.lost) : bar(o.lost, mx('lost'), 'rose') },
+    { t: 'Sotuv', r: 1, s: o => o.won, f: o => o._foot ? num(o.won) : bar(o.won, mx('won'), 'green') },
+    { t: 'Deal summasi', r: 1, s: o => o.amount, f: o => moneyShort(o.amount) },
+    ...(tot.paid > 0 ? [{ t: "To'langan", r: 1, s: o => o.paid, f: o => o._foot ? moneyShort(o.paid) : bar(o.paid, mx('paid'), 'teal', moneyShort(o.paid)) },
+    { t: 'Qoldiq (qarz)', r: 1, s: o => o.rem, f: o => o._foot ? moneyShort(o.rem) : bar(o.rem, mx('rem'), 'amber', moneyShort(o.rem)) }] : []),
+  ], stList, { _foot: true, deals: tot.deals, lost: tot.lost, won: tot.won, amount: tot.amount, paid: tot.paid, rem: tot.rem });
+  const lr = {}; for (const r of d.lostReasons) lr[r.reason] = (lr[r.reason] || 0) + +r.deals;
+  const lrList = Object.entries(lr).map(([key, n]) => ({ key, n })).sort((a, b) => b.n - a.n), lrAll = lrList.reduce((a, o) => a + o.n, 0), lrMax = Math.max(0, ...lrList.map(o => o.n));
+  const hasPaid = tot.paid > 0, wonSum = stList.reduce((a, o) => a + o.wonAmount, 0), openSum = stList.reduce((a, o) => a + o.openAmount, 0);
+  const note = hasPaid ? '' : `<div class="mb-6 text-xs rounded-xl border border-line bg-surface2 px-4 py-3 text-muted"><b class="text-fg">To'lovlar Bitrix'da yuritilmayapti:</b> «Всего оплачено» va «Дата первой оплаты» maydonlari bo'sh. Shuning uchun summa — sotilgan deallarning «Сумма» maydoni, sikl — deal yopilgan sana bo'yicha. Aniq to'lovlar uchun to'lov tizimini (masalan, Hollyhop) ulash kerak.</div>`;
+  return `<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+      ${hasPaid ? kpi("To'langan", moneyShort(tot.paid) + " so'm", `${num(tot.won)} ta sotuv`, 'teal') : kpi('Sotuvlar summasi', moneyShort(wonSum) + " so'm", `${num(tot.won)} ta sotuv · deal summasi`, 'green')}
+      ${hasPaid ? kpi('Qoldiq (qarz)', moneyShort(tot.rem) + " so'm", "to'lanmagan qism", 'amber') : kpi('Jarayondagi deallar', moneyShort(openSum) + " so'm", "hali yopilmagan deallar summasi", 'amber')}
+      ${kpi("O'rtacha chek", moneyShort(div(hasPaid ? tot.paid : wonSum, tot.won)) + " so'm", hasPaid ? "to'langan / sotuvlar" : 'sotuv summasi / sotuvlar', 'blue')}${kpi('Sotuv sikli (mediana)', fmtD(q(0.5)), `o'rtacha ${fmtD(avg)}`, 'violet')}
+    </div>` + note + cycleCard +
+    card(h3("Deallar stadiya bo'yicha", "Tanlangan davrda ochilgan deallar, hozirgi stadiyasi bo'yicha. Summa — deal «Сумма» maydoni.") + stageTable, 'mb-6') +
+    card(h3('Nega sotib olmadi', "Yopilgan (провалена) deallar, Bitrix'dagi sabab maydonidan") + (lrList.length && !(lrList.length === 1 && lrList[0].key.startsWith('Sabab')) ? `<div class="space-y-1.5">${lrList.map(o => `<div class="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] items-center gap-3 text-sm"><span class="truncate">${esc(o.key)}</span>${bar(o.n, lrMax, o.key.startsWith('Sabab') ? 'crimson' : 'rose', `${o.n} · ${pct(div(o.n, lrAll))}`)}</div>`).join('')}</div>` : `<div class="text-sm text-muted py-4">${num(lrAll)} ta deal yopilgan, lekin Bitrix'dagi «Nega sotib olmadi?» / «Sotib olmaganini sababi» maydoni hech birida to'ldirilmagan. Menejerlar shu maydonni majburiy to'ldirsa, bu yerda sabablar chiqadi. Hozircha leadlar bo'yicha sabablar «Voronka» bo'limida.</div>`));
+}
+
+// Call-scoring rules from the company sales script (Miro "Sotuv ssenariysi"); keep in sync with RUBRIC in supabase/functions/call-analyze.
+const RUBRIC = [
+  ['rapport', "Munosabat o'rnatish", [['r_intro', 4, "Salomlashdi, Robbit akademiyasidan ekanini va o'z ismini aytdi"], ['r_name', 3, "Mijozni ismi bilan murojaat qildi (ismini so'radi yoki tasdiqladi)"], ['r_reason', 3, "Qo'ng'iroq sababini aytdi (qiziqish bildirgansiz / qanday yordam bera olaman)"]]],
+  ['filter', 'Filtr', [['f_who', 3, 'Kim uchun (farzand) ekanini aniqladi'], ['f_age', 3, "Farzand yoshini so'radi"], ['f_region', 2, 'Viloyat/filialni aniqladi'], ['f_price', 2, "Narx so'ralganda darhol aytmay, avval savollarga o'tdi"]]],
+  ['spin', 'Ehtiyoj (SPIN)', [['s_situation', 5, "S — farzand hozir nima bilan band, qo'shimcha kurslari, gadjet vaqti"], ['s_problem', 5, "P — qiziqish o'zidanmi yoki ota-ona yo'naltiryaptimi, muammoni ochdi"], ['s_implication', 5, "I — muammo oqibatini ko'rsatdi (vaqt besamar, qiziqish so'nadi)"], ['s_answer', 5, "Mijoz javobiga skriptdagi mos gap bilan munosabat bildirdi"]]],
+  ['fab', 'Taqdimot (FAB)', [['p_frame', 3, "Taqdimotga ruxsat oldi (ma'qul bo'lsa ro'yxatga olaman, kelishdikmi?)"], ['p_feature', 4, 'F — 1 yil, haftada 3 kun, 1,5 soatdan'], ['p_advantage', 4, "A — 3 yo'nalish bir kursda, sun'iy intellekt, STEAM"], ['p_benefit', 6, 'B — bolaga natija: loyihalar, portfolio, startap, Demo Day, mustaqil fikrlash'], ['p_questions', 2, 'Taqdimot ichida savollar berdi (kompyuter, qulay vaqt, musobaqa, kutilgan natija)'], ['p_value', 2, "Qo'shimcha qiymat: o'quv bo'limi, musobaqalar, Robbit ilovasi, gemifikatsiya"]]],
+  ['socratic', 'Sokrat (yopish)', [['c_questions', 3, '«Qanday savollaringiz bor?» deb so\'radi'], ['c_agree', 4, "«Dasturlar ma'qul keldimi?» — mijozdan «ha» oldi"], ['c_trial', 5, 'Bepul amaliy darsga taklif qildi'], ['c_book', 3, "Aniq vaqtga yozdi yoki ro'yxatga olishni so'radi"]]],
+  ['objections', "E'tirozlar", [['o_isolate', 4, "E'tirozni ajratdi («narxdan boshqa hammasi ma'qulmi?» / 3 holat savoli)"], ['o_script', 4, 'Skriptdagi javobni ishlatdi (investitsiya, garantiya, vaqt, lokatsiya, maslahat)'], ['o_deadline', 4, 'Joyni band qilib, javob muddatini belgiladi (masalan ertalab 10:00 gacha)']]],
+  ['deal', 'Kelishuv va Telegram', [['d_telegram', 4, "Telegramdan ma'lumot va lokatsiya yuborishni kelishdi"], ['d_next', 4, "Keyingi qadam aniq: sana, vaqt, kim bog'lanadi"], ['d_discount', 4, "Chegirmani reglament bo'yicha taklif qildi: ro'yxatdagi foiz va muddat, faqat bitta, kerak bo'lsa ma'lumotnoma"]]],
+];
+// Discount policy the managers may offer (one discount per student).
+const DISCOUNTS = [
+  ['Bir martalik', [['Ketgan mijozni qaytarish (1 marta, 1 oyga)', '15%'], ['Yangi mijoz, birinchi oy', '20%'], ['Hamkor flayeri orqali, birinchi oy', '20%']]],
+  ['3 oy uchun maxsus (dastlabki 3 oy)', [['Shifokorlar farzandlari*', '5%'], ["O'qituvchilar farzandlari*", '5%'], ['Ichki ishlar xodimlari farzandlari*', '5%'], ['Robbit xodimlari farzandlari va yaqin qarindoshlari', '5%'], ["Bir oiladan 2+ farzand (ikkalasiga)", '5%'], ['«Temir daftar»dagi fuqarolar*', '5%'], ['Ijtimoiy paket hamkorlari xodimlari farzandlari (xodimlar uchun)*', '5%'], ["Ijtimoiy paket hamkorlari xodimlari farzandlari (o'quvchilar uchun)*", '5%']]],
+];
+const CRIT = Object.fromEntries(RUBRIC.flatMap(([st, , items]) => items.map(([c, max, t]) => [c, { st, max, t }])));
+const BX_LEAD = id => `https://robbit.bitrix24.kz/crm/lead/details/${id}/`;
+const opNameOf = id => S.data.users[id] || (id ? `#${id}` : '—');
+const normName = n => String(n || '').split('|')[0].trim().toLowerCase();
+const scoreTone = n => n == null ? 'neutral' : n >= 75 ? 'success' : n >= 50 ? 'warn' : 'danger';
+const scoreChip = n => chip(n == null ? '—' : n, scoreTone(n));
+const avgOf = (rows, f) => { const xs = rows.map(f).filter(v => v != null && isFinite(v)); return xs.length ? xs.reduce((a, b) => a + +b, 0) / xs.length : null; };
+const go = (op, call) => `onclick="S.op=${op == null ? 'null' : `'${esc(String(op)).replace(/'/g, "\\'")}'`};S.call=${call == null ? 'null' : `'${esc(call)}'`};render();scrollTo(0,0)"`;
+const crumbs = (...parts) => `<div class="flex flex-wrap items-center gap-1.5 text-[13px] text-muted mb-4">${parts.map(([t, on]) => on ? `<button ${on} class="hover:text-fg underline-offset-2 hover:underline">${t}</button>` : `<span class="text-fg font-semibold">${t}</span>`).join('<i class="ph-bold ph-caret-right text-[10px]"></i>')}</div>`;
+const kpiTile = (l, v, sub, color) => `<div class="bg-surface rounded-3xl p-5"><div class="text-[11px] font-semibold tracking-wide uppercase" style="color:rgb(var(--c-${color}))">${l}</div><div class="text-[28px] leading-tight font-bold mt-1 tabular-nums">${v}</div>${sub ? `<div class="text-[11px] text-muted mt-1">${sub}</div>` : ''}</div>`;
+const analysed = () => (S.data.calls || []).filter(r => r.transcript);
+const isSale = c => !c.call_type || c.call_type === 'sotuv';
+
+// One row per manager for the selected dates: CRM outcomes + call scores.
+function managerRows() {
+  const by = {};
+  for (const r of S.data.operators || []) {
+    const k = normName(r.operator), o = by[k] ??= { key: k, name: String(r.operator).split('|')[0].trim(), leads: 0, contacted: 0, qual: 0, came: 0, won: 0, junk: 0, calls: [] };
+    o.leads += +r.leads || 0; o.contacted += +r.contacted || 0; o.qual += +r.qual || 0; o.came += +r.came_to_branch || 0; o.won += +r.won || 0; o.junk += +r.junk || 0;
+  }
+  for (const c of analysed()) {
+    const n = opNameOf(c.operator_id), k = normName(n);
+    (by[k] ??= { key: k, name: n, leads: 0, contacted: 0, qual: 0, came: 0, won: 0, junk: 0, calls: [] }).calls.push(c);
+  }
+  return Object.values(by).map(o => { const sales = o.calls.filter(isSale); return { ...o, sales, total: avgOf(sales, c => c.total), stages: Object.fromEntries(RUBRIC.map(([st]) => [st, avgOf(sales, c => c.stages?.[st])])) }; });
+}
+
+function managers() {
+  if (S.call) return callDetail();
+  if (S.op) return managerDetail();
+  const rows = managerRows().sort((a, b) => b.leads - a.leads || b.calls.length - a.calls.length);
+  const weakest = r => { const e = Object.entries(r.stages).filter(([, v]) => v != null).sort((a, b) => a[1] - b[1])[0]; return e ? chip(RUBRIC.find(x => x[0] === e[0])[1], 'danger') : '—'; };
+  return card(h3('Menejerlar', `Tanlangan davr: ${fmtDay(S.from)} — ${fmtDay(S.to)}. Qatorni bosing — menejerning qo'ng'iroqlari va xatolari ochiladi.`) + table([
+    { t: 'Menejer', f: r => `<button ${go(r.key)} class="font-semibold text-left hover:text-accent">${esc(r.name)}</button>` },
+    { t: 'Leadlar', r: 1, f: r => num(r.leads) }, { t: 'Sifatli', r: 1, f: r => num(r.qual) }, { t: 'Filialga keldi', r: 1, f: r => num(r.came) }, { t: 'Sotuv', r: 1, f: r => num(r.won) },
+    { t: 'Sifatli→sotuv', r: 1, f: r => pct(r.qual ? r.won / r.qual : null) }, { t: "Tahlil qilingan qo'ng'iroq", r: 1, f: r => r.calls.length ? `${num(r.sales.length)} <span class="text-muted">/ ${num(r.calls.length)}</span>` : '0' },
+    { t: 'Ball (100)', r: 1, f: r => scoreChip(r.total == null ? null : Math.round(r.total)) },
+    ...RUBRIC.map(([st, t]) => ({ t, r: 1, f: r => r.stages[st] == null ? '—' : `<span class="tabular-nums">${Math.round(r.stages[st])}</span>` })),
+    { t: 'Zaif bosqich', f: weakest },
+  ], rows)) + `<div class="mt-6">${rubricCard()}</div>`;
+}
+
+function managerDetail() {
+  const m = managerRows().find(r => r.key === S.op) || { name: S.op, calls: [], stages: {}, leads: 0, qual: 0, won: 0 };
+  const calls = [...m.calls].sort((a, b) => String(b.call_start).localeCompare(String(a.call_start)));
+  const mis = Object.entries(calls.flatMap(c => c.mistakes_detail || []).reduce((acc, x) => { const k = String(x.problem || '').toLowerCase(); (acc[k] ??= { n: 0, ex: x }).n++; return acc; }, {})).sort((a, b) => b[1].n - a[1].n).slice(0, 8);
+  const crit = Object.entries(calls.flatMap(c => c.rubric || []).filter(r => r.applicable).reduce((acc, r) => { const o = acc[r.code] ??= { p: 0, max: 0 }; o.p += +r.points || 0; o.max += CRIT[r.code]?.max || 0; return acc; }, {})).map(([c, o]) => [c, o.max ? o.p / o.max * 100 : null]).sort((a, b) => a[1] - b[1]);
+  const booked = calls.filter(c => c.outcome === 'yozildi').length;
+  return crumbs(['Menejerlar', go(null)], [esc(m.name)]) +
+    `<div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">${kpiTile('Ball', m.total == null ? '—' : Math.round(m.total), '100 ballik reglament', 'amber')}${kpiTile("Qo'ng'iroqlar", num(calls.length), 'tahlil qilingan', 'blue')}${kpiTile('Yozildi', num(booked), pct(calls.length ? booked / calls.length : null), 'green')}${kpiTile('Leadlar', num(m.leads), `${num(m.qual)} sifatli`, 'violet')}${kpiTile('Sotuv', num(m.won), pct(m.qual ? m.won / m.qual : null) + ' sifatlidan', 'teal')}</div>
+    <div class="grid lg:grid-cols-2 gap-4 mb-6">${card(h3('Bosqichlar bo\'yicha', "Har bosqich 100 ga keltirilgan") + RUBRIC.map(([st, t]) => `<div class="flex items-center justify-between gap-3 py-1.5 text-[13px]"><span>${t}</span>${bar(m.stages[st] ?? 0, 100, (m.stages[st] ?? 0) >= 75 ? 'green' : (m.stages[st] ?? 0) >= 50 ? 'amber' : 'rose', m.stages[st] == null ? '—' : Math.round(m.stages[st]))}</div>`).join(''))}
+    ${card(h3('Eng zaif mezonlar', 'Reglamentdagi mezonlar, bajarilish %') + (crit.length ? crit.slice(0, 6).map(([c, v]) => `<div class="flex items-center justify-between gap-3 py-1.5 text-[13px]"><span>${esc(CRIT[c]?.t || c)}</span>${bar(v, 100, 'rose', Math.round(v) + '%')}</div>`).join('') : empty("Ma'lumot yo'q")))}</div>
+    ${card(h3('Takrorlanadigan xatolar', 'Va ularning o\'rniga nima deyish kerak') + (mis.length ? mis.map(([, o]) => `<div class="py-2 border-b border-line/60 last:border-0 text-[13px]"><div class="flex justify-between gap-3"><span class="font-semibold">${esc(o.ex.problem)}</span>${chip(o.n + ' marta', 'danger')}</div><div class="text-accent mt-1"><i class="ph-bold ph-chat-teardrop-text"></i> ${esc(o.ex.better)}</div></div>`).join('') : empty("Xato topilmadi")), 'mb-6')}
+    ${card(h3("Qo'ng'iroqlar", "Bosing — to'liq tahlil, mezonlar va dialog") + callList(calls))}`;
+}
+
+const callList = calls => calls.length ? table([
+  { t: 'Vaqt', f: c => `<button ${go(S.op ?? normName(opNameOf(c.operator_id)), c.call_id)} class="tabular-nums hover:text-accent">${esc(String(c.call_start).slice(0, 16).replace('T', ' '))}</button>` },
+  { t: 'Menejer', f: c => esc(opNameOf(c.operator_id)) },
+  { t: 'Lead', f: c => c.lead_id ? `<a href="${BX_LEAD(c.lead_id)}" target="_blank" rel="noopener" class="text-accent hover:underline">#${c.lead_id}</a>` : '—' },
+  { t: 'Turi', f: c => `${esc(c.direction)}${c.call_type && c.call_type !== 'sotuv' ? ' ' + chip(esc(c.call_type), 'neutral') : ''}` }, { t: 'Davomiylik', r: 1, f: c => num(c.duration) + ' s' },
+  { t: 'Natija', f: c => chip(esc(c.outcome || '—'), c.outcome === 'yozildi' ? 'success' : c.outcome === 'rad etdi' ? 'danger' : 'info') },
+  { t: 'Ball', r: 1, f: c => scoreChip(c.total) },
+  { t: 'Asosiy xato', f: c => esc((c.mistakes || [])[0] || '—') },
+  { t: '', f: c => `<button ${go(S.op ?? normName(opNameOf(c.operator_id)), c.call_id)} class="text-accent font-semibold">Ochish →</button>` },
+], calls) : empty("Bu davrda tahlil qilingan qo'ng'iroq yo'q");
+
+// Dialog as chat bubbles: customer left, operator right, recorded voice (IVR) centred.
+function dialog(text) {
+  const lines = String(text || '').split('\n').map(l => l.trim()).filter(Boolean);
+  if (!lines.length) return empty("Dialog yo'q");
+  return `<div class="flex flex-col gap-2 text-[13px] leading-relaxed">${lines.map(l => {
+    const m = l.match(/^(Operator|Mijoz|Avtojavob)\s*:\s*(.*)$/i), who = m ? m[1].toLowerCase() : '', t = esc(m ? m[2] : l);
+    if (who === 'avtojavob') return `<div class="self-center text-[11.5px] text-muted italic px-3 py-1 rounded-full bg-surface2">🔊 ${t}</div>`;
+    if (who === 'operator') return `<div class="self-end max-w-[80%] rounded-2xl rounded-br-sm px-3.5 py-2" style="background:rgb(var(--accent) / .16)"><div class="text-[10.5px] font-semibold text-accent mb-0.5">Operator</div>${t}</div>`;
+    return `<div class="self-start max-w-[80%] rounded-2xl rounded-bl-sm px-3.5 py-2 bg-surface2"><div class="text-[10.5px] font-semibold text-muted mb-0.5">Mijoz</div>${t}</div>`;
+  }).join('')}</div>`;
+}
+// Recording is streamed by the call-audio function with the admin's session.
+async function playCall(id) {
+  const box = $('aud'); box.innerHTML = '<span class="text-sm text-muted">Yozuv yuklanmoqda…</span>';
+  try {
+    const { data } = await sbc.auth.getSession();
+    const res = await fetch(`${SB_URL}/functions/v1/call-audio?id=${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${data.session?.access_token}`, apikey: SB_KEY } });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.status);
+    box.innerHTML = `<audio controls autoplay class="w-full" src="${URL.createObjectURL(await res.blob())}"></audio>`;
+  } catch (e) { box.innerHTML = `<span class="text-sm text-danger">Yozuvni ochib bo'lmadi: ${esc(e.message)}</span>`; }
+}
+async function requeueCall(id) {
+  const { error } = await sbc.rpc('requeue_call', { p_call_id: id });
+  alert(error ? 'Xato: ' + error.message : "Navbatga qo'yildi — AI 5–10 daqiqada qayta tahlil qiladi (sahifani keyin yangilang).");
+}
+
+function callDetail() {
+  const c = (S.data.calls || []).find(x => x.call_id === S.call);
+  if (!c) return crumbs(['Menejerlar', go(null)]) + card(empty("Qo'ng'iroq topilmadi (sana oralig'ini tekshiring)"));
+  const name = opNameOf(c.operator_id), key = S.op ?? normName(name), byCode = Object.fromEntries((c.rubric || []).map(r => [r.code, r]));
+  const back = S.page === 'calls' ? ["Qo'ng'iroqlar tahlili", go(null)] : ['Menejerlar', go(null)];
+  const note = (t, v) => v ? `<div class="py-2"><div class="text-[11px] uppercase tracking-wide text-muted font-semibold mb-0.5">${t}</div><div class="text-[13px]">${esc(v)}</div></div>` : '';
+  return crumbs(back, [esc(name), go(key)], [esc(String(c.call_start).slice(0, 16).replace('T', ' '))]) +
+    card(`<div class="flex flex-wrap items-center gap-3"><div id="aud" class="flex-1 min-w-[260px]"><button onclick="playCall('${esc(c.call_id)}')" class="h-10 px-4 rounded-xl bg-accent text-surface font-semibold inline-flex items-center gap-2"><i class="ph-bold ph-play"></i>Yozuvni tinglash</button></div>
+      <button onclick="requeueCall('${esc(c.call_id)}')" class="h-10 px-4 rounded-xl bg-surface2 font-semibold inline-flex items-center gap-2" title="AI shu qo'ng'iroqni yangi qoidalar bilan qayta tahlil qiladi"><i class="ph-bold ph-arrows-clockwise"></i>Qayta tahlil</button></div>`, 'mb-6') +
+    `<div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">${kpiTile('Ball', c.total ?? '—', isSale(c) ? '100 dan' : `${esc(c.call_type)} — baholanmaydi`, 'amber')}${kpiTile('Natija', esc(c.outcome || '—'), '', 'green')}${kpiTile('Qiziqish', c.interest ?? '—', '1–5', 'violet')}${kpiTile('Davomiylik', num(c.duration) + ' s', esc(c.direction), 'blue')}${kpiTile('Lead', c.lead_id ? `<a href="${BX_LEAD(c.lead_id)}" target="_blank" rel="noopener" class="hover:underline">#${c.lead_id}</a>` : '—', "Bitrix'da ochish", 'teal')}</div>
+    <div class="grid lg:grid-cols-2 gap-4 mb-6">${card(h3('Xulosa') + `<div class="text-[13px] mb-2">${esc(c.summary)}</div>` + note('SPIN va Sokrat', c.socratic_note) + note('FAB', c.fab_note) + note('Skript (Miro)', c.script_note) + note('Keyingi qadam', c.next_step) + note("E'tirozlar", (c.objections || []).join(', ')) + note('Yaxshi tomonlari', (c.good || []).join(', ')) + `<div class="mt-2 text-[13px] text-accent"><i class="ph-bold ph-lightbulb"></i> ${esc(c.advice)}</div>`)}
+    ${card(h3('Xatolar', "Qayerda va o'rniga nima deyish kerak edi") + ((c.mistakes_detail || []).length ? c.mistakes_detail.map(m => `<div class="py-2 border-b border-line/60 last:border-0 text-[13px]"><div class="flex gap-2"><span class="text-muted tabular-nums shrink-0">${esc(m.moment)}</span><span class="font-semibold">${esc(m.problem)}</span></div><div class="text-accent mt-1"><i class="ph-bold ph-chat-teardrop-text"></i> ${esc(m.better)}</div></div>`).join('') : empty("Xato topilmadi")))}</div>
+    ${card(h3('Reglament bo\'yicha baho', 'Har bir mezon: ball / maksimum va dalil (qo\'ng\'iroqdan iqtibos)') + RUBRIC.map(([st, t, items]) => `<div class="mt-3 first:mt-0"><div class="flex justify-between text-[13px] font-semibold mb-1"><span>${t}</span><span class="tabular-nums">${c.stages?.[st] == null ? "tegishli emas" : c.stages[st] + '%'}</span></div>${items.map(([code, max, text]) => { const r = byCode[code] || {}; const na = r.applicable === false; return `<div class="grid grid-cols-[1fr_auto] gap-x-3 py-1 text-[12.5px] border-b border-line/40 last:border-0"><span>${esc(text)}</span><span class="tabular-nums font-semibold ${na ? 'text-muted' : (r.points || 0) >= max ? 'text-success' : (r.points || 0) > 0 ? 'text-warn' : 'text-danger'}">${na ? '—' : `${r.points ?? 0}/${max}`}</span>${r.evidence && !na ? `<span class="col-span-2 text-muted italic">«${esc(r.evidence)}»</span>` : ''}</div>`; }).join('')}</div>`).join(''), 'mb-6')}
+    ${card(h3('Dialog', "AI yozib olgan matn: chapda mijoz, o'ngda operator (shaxsiy ma'lumotlar yashirilgan)") + dialog(c.transcript))}`;
+}
+
+function rubricCard() {
+  return card(h3('Baholash reglamenti (100 ball)', "Kompaniyaning Miro'dagi «Sotuv ssenariysi» asosida: munosabat → filtr → SPIN → FAB → Sokrat yopish → kelishuv, e'tirozlar. AI skriptni ham o'qiydi va operator qaysi gapni o'tkazib yuborganini yozadi. Faqat sotuv qo'ng'iroqlari baholanadi (eslatma, xizmat qo'ng'iroqlari ballga kirmaydi). To'liq bajarilsa — maksimum, qisman — yarmi atrofida, bajarilmasa — 0. Vaziyatga tegishli bo'lmagan mezon (masalan, e'tiroz bo'lmasa) hisobdan chiqariladi va ball 100 ga keltiriladi. 75+ yaxshi, 50–74 o'rtacha, 50 dan past — zaif.") +
+    `<div class="grid md:grid-cols-2 gap-4 mb-4">${DISCOUNTS.map(([t, items]) => `<div class="rounded-2xl bg-surface2 p-4"><div class="font-semibold text-[13px] mb-2">Chegirmalar — ${t}</div>${items.map(([x, v]) => `<div class="flex justify-between gap-3 py-1 text-[12.5px]"><span>${esc(x)}</span><span class="tabular-nums font-semibold shrink-0">${v}</span></div>`).join('')}</div>`).join('')}</div>
+    <div class="text-[12px] text-muted mb-4">* ma'lumotnoma asosida. Qoida: bitta o'quvchi faqat bitta chegirmadan foydalanadi, ikki va undan ortiq chegirma taqiqlanadi. Ro'yxatda yo'q foiz, noto'g'ri muddat yoki ikkita chegirma va'da qilinsa — «Chegirma» mezoni 0 ball va xato sifatida yoziladi.</div>
+    <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">${RUBRIC.map(([, t, items]) => `<div class="rounded-2xl bg-surface2 p-4"><div class="flex justify-between font-semibold text-[13px] mb-2"><span>${t}</span><span class="tabular-nums">${items.reduce((a, i) => a + i[1], 0)} ball</span></div>${items.map(([, max, text]) => `<div class="flex justify-between gap-3 py-1 text-[12.5px]"><span>${esc(text)}</span><span class="tabular-nums text-muted shrink-0">${max}</span></div>`).join('')}</div>`).join('')}</div>`);
+}
+
+// AI review of Bitrix call recordings (call-analyze edge function, Gemini free tier), for the selected dates.
+function calls() {
+  if (S.call) return callDetail();
+  const all = S.data.calls || [], ok = analysed(), sales = ok.filter(isSale);
+  const queued = all.filter(r => !r.transcript && !r.error).length, failed = all.filter(r => !r.transcript && r.error).length;
+  const F = S.callF ||= { type: 'sotuv', low: false };
+  const top = (xs, k, n = 8) => Object.entries(xs.flatMap(r => r[k] || []).reduce((m, x) => (m[x.toLowerCase()] = (m[x.toLowerCase()] || 0) + 1, m), {})).sort((a, b) => b[1] - a[1]).slice(0, n);
+  const list = (t, sub, rows, color) => card(h3(t, sub) + (rows.length ? rows.map(([x, n]) => `<div class="flex items-center justify-between gap-3 py-1.5 border-b border-line/60 last:border-0 text-[13px]"><span>${esc(x)}</span>${bar(n, rows[0][1], color, num(n))}</div>`).join('') : empty("Ma'lumot yo'q")));
+  const booked = sales.filter(r => r.outcome === 'yozildi').length;
+  // Team average per script stage: where points are lost.
+  const stages = RUBRIC.map(([st, t]) => ({ st, t, v: avgOf(sales, c => c.stages?.[st]) })).filter(x => x.v != null);
+  const weakest = [...stages].sort((a, b) => a.v - b.v)[0];
+  const mgrs = managerRows().filter(r => r.sales.length).map(r => ({ ...r, booked: div(r.sales.filter(c => c.outcome === 'yozildi').length, r.sales.length) })).sort((a, b) => (a.total ?? 101) - (b.total ?? 101));
+  const weakStage = r => { const e = Object.entries(r.stages).filter(([, v]) => v != null).sort((a, b) => a[1] - b[1])[0]; return e ? RUBRIC.find(x => x[0] === e[0])[1] : '—'; };
+  let shown = F.type === 'sotuv' ? sales : ok;
+  if (F.low) shown = shown.filter(c => c.total != null && c.total < 50);
+  const seg = (items, cur, set) => `<div class="inline-flex p-1 bg-surface2 rounded-xl text-xs font-semibold">${items.map(([k, t]) => `<button onclick="${set.replace('$', k)}" class="px-3 h-7 rounded-lg ${cur === k ? 'bg-surface shadow-sm text-fg' : 'text-muted hover:text-fg'}">${t}</button>`).join('')}</div>`;
+  return `<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">${kpiTile("Sotuv qo'ng'iroqlari", num(sales.length), `${num(ok.length)} ta tahlildan · eslatma/xizmat ballga kirmaydi${queued ? ` · ${num(queued)} navbatda` : ''}${failed ? ` · ${num(failed)} xato` : ''}`, 'blue')}${kpiTile("O'rtacha ball", avgOf(sales, c => c.total)?.toFixed(0) ?? '—', '100 ballik reglament · 75+ yaxshi', 'amber')}${kpiTile('Sinov darsiga yozildi', pct(div(booked, sales.length)), `${num(booked)} ta sotuv qo'ng'irog'idan`, 'green')}${kpiTile('Jamoaning zaif bosqichi', weakest ? esc(weakest.t) : '—', weakest ? `o'rtacha ${Math.round(weakest.v)} / 100` : '', 'rose')}</div>
+  <div class="grid lg:grid-cols-2 gap-4 mb-6">
+    ${card(h3('Jamoa qayerda ball yo\'qotyapti', "Skript bosqichlari bo'yicha o'rtacha (100 ga keltirilgan). Eng qisqa chiziq — birinchi navbatda o'rgatish kerak bo'lgan bosqich.") + (stages.length ? stages.map(x => `<div class="flex items-center justify-between gap-3 py-1.5 text-[13px]"><span class="w-44 shrink-0">${x.t}</span>${bar(x.v, 100, x.v >= 75 ? 'green' : x.v >= 50 ? 'amber' : 'rose', Math.round(x.v))}</div>`).join('') : empty("Sotuv qo'ng'irog'i yo'q")))}
+    ${card(h3('Menejerlar', "Eng past balldan boshlab. Ismni bosing — uning qo'ng'iroqlari va xatolari.") + (mgrs.length ? table([
+      { t: 'Menejer', f: r => `<button ${go(r.key)} class="font-semibold text-left hover:text-accent">${esc(r.name)}</button>` },
+      { t: "Qo'ng'iroq", r: 1, s: r => r.sales.length, f: r => num(r.sales.length) }, { t: 'Ball', r: 1, s: r => r.total ?? -1, f: r => scoreChip(r.total == null ? null : Math.round(r.total)) },
+      { t: 'Yozildi', r: 1, s: r => r.booked ?? -1, f: r => pct(r.booked) }, { t: 'Zaif bosqich', f: r => esc(weakStage(r)) },
+    ], mgrs) : empty("Ma'lumot yo'q")))}
+  </div>
+  <div class="grid lg:grid-cols-2 gap-4 mb-6">${list('Operator xatolari', "Sotuv qo'ng'iroqlarida eng ko'p takrorlanadigan — o'quv mavzusi", top(sales, 'mistakes'), 'amber')}${list("Mijoz e'tirozlari", "Eng ko'p eshitilgan — skriptda javobi bo'lishi kerak", top(sales, 'objections'), 'rose')}</div>
+  ${card(`<div class="flex flex-wrap items-center gap-3 mb-4">${seg([['sotuv', 'Sotuv'], ['all', 'Hammasi']], F.type, "S.callF.type='$';render()")}<label class="inline-flex items-center gap-2 text-sm"><input type="checkbox" ${F.low ? 'checked' : ''} onchange="S.callF.low=this.checked;render()"> Faqat past ball (&lt;50)</label><span class="text-xs text-muted ml-auto">${num(shown.length)} ta</span></div>` +
+    h3("Qo'ng'iroqlar", "Bosing — yozuv, xatolar va «o'rniga nima deyish kerak edi», reglament bo'yicha baho va dialog.") + callList([...shown].sort((a, b) => String(b.call_start).localeCompare(String(a.call_start)))), 'mb-6')}
+  <details class="bg-surface rounded-3xl p-4 sm:p-5"><summary class="cursor-pointer font-semibold text-[15px]">Baholash reglamenti (100 ball) — qanday hisoblanadi</summary><div class="mt-4">${rubricCard().replace(/^<div class="bg-surface rounded-3xl p-4 sm:p-5 ">/, '<div>')}</div></details>`;
+}
+
+function briefs() {
+  const rows = S.data.briefs.filter(r => !S.course || r.course === S.course);
+  const tone = { draft: 'info', approved: 'success', rejected: 'danger' }, lbl = { draft: 'Qoralama', approved: 'Tasdiqlangan', rejected: 'Rad etilgan' };
+  const part = (t, v, color) => v ? `<div class="mt-3"><div class="text-[11px] font-bold uppercase tracking-wide" style="color:rgb(var(--c-${color}))">${t}</div><div class="text-[13.5px] mt-0.5 whitespace-pre-line">${esc(v)}</div></div>` : '';
+  const head = card(`<div class="flex flex-wrap items-center gap-3"><div class="flex-1 min-w-[240px]"><div class="font-semibold">Brief — tayyor reklama ssenariysi</div><div class="text-xs text-muted mt-0.5">AI oxirgi 30 kunni o'qiydi: leadlar nega yo'qolgani (Bitrix statuslari), ota-onalar qo'ng'iroqda aytgan og'riq va e'tirozlar, qaysi reklama arzon sifatli lead bergani. Har brief: Hook (birinchi 3 soniya) → Body (asosiy qism) → CTA (chaqiriq). Tasdiqlansa, targetolog shu bo'yicha kreativ tayyorlaydi.</div></div>
+    <button onclick="genBriefs()" ${S.briefBusy ? 'disabled' : ''} class="h-10 px-4 rounded-xl bg-fg text-surface text-sm font-semibold inline-flex items-center gap-2 disabled:opacity-60"><i class="ph-bold ${S.briefBusy ? 'ph-spinner animate-spin' : 'ph-sparkle'}"></i>${S.briefBusy ? 'Yozilmoqda…' : 'Yangi brieflar yaratish'}</button></div>`, 'mb-4');
+  if (!rows.length) return head + card(empty("Hali brief yo'q — «Yangi brieflar yaratish» tugmasini bosing."));
+  return head + `<div class="grid md:grid-cols-2 gap-4">${rows.map(b => card(`<div class="flex justify-between gap-2 mb-1"><div class="text-xs text-muted">${esc(b.week)} · ${esc(b.pain_code || '')} · ${esc(b.offer_type || '')}</div>${chip(lbl[b.status], tone[b.status])}</div>
+    ${b.body || b.cta ? part('Hook — birinchi 3 soniya', b.hook, 'rose') + part('Body — asosiy qism', b.body, 'blue') + part('CTA — chaqiriq', b.cta, 'green') : `<div class="font-semibold mt-1">${esc(b.hook)}</div>`}
+    ${part(b.body || b.cta ? 'Muammo · auditoriya · o\'lchov' : '', b.script, 'violet')}
+    ${b.evidence ? `<div class="mt-3 text-[11.5px] text-muted"><i class="ph-bold ph-chart-bar"></i> ${esc(b.evidence)}</div>` : ''}
+    ${b.status === 'draft' ? `<div class="flex gap-2 mt-4"><button onclick="setBrief(${b.id},'rejected')" class="flex-1 h-9 rounded-xl bg-surface2 text-sm font-semibold">Rad etish</button><button onclick="setBrief(${b.id},'approved')" class="flex-1 h-9 rounded-xl bg-fg text-surface text-sm font-semibold">Tasdiqlash</button></div>` : ''}`)).join('')}</div>`;
+}
+async function genBriefs() {
+  S.briefBusy = true; render();
+  try {
+    const { data } = await sbc.auth.getSession();
+    const res = await fetch(`${SB_URL}/functions/v1/brief-generate`, { method: 'POST', headers: { authorization: `Bearer ${data.session?.access_token}`, apikey: SB_KEY } });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || res.status);
+    S.data.briefs = await q('briefs', x => x.order('created_at', { ascending: false }));
+  } catch (e) { alert("Brief yaratib bo'lmadi: " + e.message); }
+  S.briefBusy = false; render();
+}
+
+async function setBrief(id, status) {
+  const { error } = await sbc.from('briefs').update({ status }).eq('id', id);
+  if (error) return alert(error.message);
+  S.data.briefs.find(b => b.id === id).status = status; render();
+}
+
+function settings() {
+  const c = S.data.cfg, arr = a => esc((a || []).join(', '));
+  const field = (id, l, val, hint) => `<label class="block"><span class="block text-xs font-semibold mb-1.5">${l}</span><input id="${id}" value="${val}" class="w-full h-10 px-3 rounded-xl bg-surface2 border border-line text-sm"><span class="block text-[11px] text-muted mt-1">${hint}</span></label>`;
+  const st = s => s.last_error ? chip('Xato', 'danger') : s.run_since ? chip('Davom etmoqda', 'info') : chip('OK', 'success');
+  return `<div class="grid lg:grid-cols-2 gap-6">
+    ${card(h3('Bitrix statuslari', "Vergul bilan. Bitrix kodlari: masalan IN_PROCESS, CONVERTED, WON, C1:WON") + `<form onsubmit="saveCfg(event)" class="space-y-4">
+      ${field('cfQual', 'Sifatli lead statuslari', arr(c.qual_statuses), 'crm.lead STATUS_ID')}
+      ${field('cfWon', 'Sotildi (won) stage', arr(c.won_stages), "Bo'sh bo'lsa — Bitrix 'muvaffaqiyatli' semantikasi")}
+      ${field('cfLost', "Yo'qotildi (lost) stage", arr(c.lost_stages), "Bo'sh bo'lsa — Bitrix 'muvaffaqiyatsiz' semantikasi")}
+      ${field('cfMin', "Min. qo'ng'iroq (soniya)", c.min_call_seconds ?? 30, "Qisqaroq qo'ng'iroqlar tahlil qilinmaydi")}
+      <button class="h-10 px-4 rounded-xl bg-fg text-surface text-sm font-semibold">Saqlash</button></form>`)}
+    <div class="space-y-6">
+    ${card(h3('Reklama valyutasi va kurs', c.fx_manual ? "Kurs qo'lda kiritilgan — Markaziy bank kursi bilan almashtirilmaydi." : "Kurs har soatda Markaziy bankdan olinadi. O'zingiznikini kiritsangiz — shu ishlatiladi.") + `<div class="grid grid-cols-3 gap-3 text-sm mb-4"><div><div class="text-xs text-muted">Valyuta (Meta hisobi)</div><div class="font-semibold mt-1">${esc(c.ad_currency || '—')}</div></div><div><div class="text-xs text-muted">Kurs (so'm)</div><div class="font-semibold mt-1 tabular-nums">${c.fx_rate ? num(c.fx_rate) : '—'}</div></div><div><div class="text-xs text-muted">Sana</div><div class="font-semibold mt-1">${c.fx_date ? fmtDay(c.fx_date) : '—'} ${c.fx_manual ? chip("qo'lda", 'warn') : chip('MB', 'neutral')}</div></div></div>
+      <form onsubmit="saveFx(event)" class="flex flex-wrap items-end gap-2"><label class="block"><span class="block text-xs font-semibold mb-1.5">1 ${esc(c.ad_currency || 'USD')} = ? so'm</span><input id="cfFx" type="number" step="0.01" min="1" value="${c.fx_rate || ''}" class="w-40 h-10 px-3 rounded-xl bg-surface2 border border-line text-sm"></label>
+        <button class="h-10 px-4 rounded-xl bg-fg text-surface text-sm font-semibold">Kursni saqlash</button>${c.fx_manual ? `<button type="button" onclick="saveFx(event, true)" class="h-10 px-4 rounded-xl bg-surface2 text-sm font-semibold">Markaziy bank kursiga qaytish</button>` : ''}</form>`)}
+    ${!S.data.courses.length ? '' : card(h3('Kurslar', 'max CPQL = o\'rtacha chek × reklama ulushi × sifatli→sotuv') + (S.data.courses.length ? `<div class="space-y-3">${S.data.courses.map(k => `<div class="grid grid-cols-4 gap-2 items-end text-sm" data-course="${esc(k.course)}">
+        <div class="font-semibold pb-2 truncate">${esc(k.course)}</div>
+        <label><span class="text-[11px] text-muted">Chek</span><input name="avg_check" value="${k.avg_check}" class="w-full h-9 px-2 rounded-lg bg-surface2 border border-line"></label>
+        <label><span class="text-[11px] text-muted">Ulush</span><input name="ad_share" value="${k.ad_share}" class="w-full h-9 px-2 rounded-lg bg-surface2 border border-line"></label>
+        <label><span class="text-[11px] text-muted">Q→S${k.qual_to_sale_manual ? '' : ' (avto)'}</span><input name="qual_to_sale" value="${(+k.qual_to_sale).toFixed(3)}" class="w-full h-9 px-2 rounded-lg bg-surface2 border border-line"></label>
+      </div>`).join('')}<button onclick="saveCourses()" class="h-10 px-4 rounded-xl bg-fg text-surface text-sm font-semibold">Kurslarni saqlash</button></div>` : empty("Kurslar birinchi sinxronizatsiyadan keyin paydo bo'ladi")))}
+    ${card(h3('Sinxronizatsiya') + (S.data.sync.length ? table([{ t: 'Manba', f: s => esc(s.source) }, { t: 'Holat', f: st }, { t: 'Oxirgi', f: s => s.last_run_at ? new Date(s.last_run_at).toLocaleString('uz') : '—' }], S.data.sync) + S.data.sync.filter(s => s.last_error).map(s => `<p class="text-xs text-danger mt-2 break-all">${esc(s.source)}: ${esc(s.last_error)}</p>`).join('') : empty("Hali ishga tushmagan — Edge Function secret'larini qo'ying")))}
+    </div></div>`;
+}
+
+const list = id => $(id).value.split(',').map(s => s.trim()).filter(Boolean);
+async function saveCfg(e) {
+  e.preventDefault();
+  const patch = { qual_statuses: list('cfQual'), won_stages: list('cfWon'), lost_stages: list('cfLost'), min_call_seconds: +$('cfMin').value || 30, updated_at: new Date().toISOString() };
+  const { error } = await sbc.from('audit_settings').update(patch).eq('id', 1);
+  if (error) return alert(error.message);
+  Object.assign(S.data.cfg, patch); alert('Saqlandi. Keyingi sinxronizatsiyada qo\'llanadi.');
+}
+async function saveFx(e, auto) {
+  e.preventDefault();
+  const rate = +$('cfFx').value;
+  if (!auto && !(rate > 0)) return alert("Kursni kiriting");
+  const patch = auto ? { fx_manual: false } : { fx_rate: rate, fx_manual: true, fx_date: iso(new Date()) };
+  const { error } = await sbc.from('audit_settings').update(patch).eq('id', 1);
+  if (error) return alert(error.message);
+  Object.assign(S.data.cfg, patch); render();
+  alert(auto ? "Keyingi sinxronizatsiyada Markaziy bank kursi olinadi." : "Saqlandi: so'mdagi barcha hisoblar shu kursda.");
+}
+async function saveCourses() {
+  for (const row of document.querySelectorAll('[data-course]')) {
+    const k = S.data.courses.find(c => c.course === row.dataset.course), val = n => +row.querySelector(`[name=${n}]`).value;
+    const patch = { avg_check: val('avg_check'), ad_share: val('ad_share') };
+    if (Math.abs(val('qual_to_sale') - k.qual_to_sale) > 0.0005) Object.assign(patch, { qual_to_sale: val('qual_to_sale'), qual_to_sale_manual: true });
+    const { error } = await sbc.from('course_settings').update(patch).eq('course', k.course);
+    if (error) return alert(error.message);
+  }
+  await refresh();
+}
+
+const AI_PROMPTS = ["Tanlangan davrda eng katta muammo nima va nimani birinchi tuzatish kerak?", "Qaysi manba va operator eng yaxshi/eng yomon konversiya beryapti?", "Reklama xarajati samaradormi? CPQL va sotuv narxini tahlil qil.", "Leadlar nega sifatsiz bo'lib yopilyapti va qanday kamaytirsa bo'ladi?"];
+function ai() {
+  const msgs = S.ai.map(m => `<div class="flex ${m.role === 'user' ? 'justify-end' : ''}"><div class="max-w-[85%] rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap ${m.role === 'user' ? 'bg-accent/20' : m.error ? 'bg-danger/10 text-danger' : 'bg-surface2'}">${esc(m.content)}</div></div>`).join('');
+  return card(h3('AI yordamchi', `Savolingizni yozing — AI tanlangan davr (${fmtDay(S.from)} — ${fmtDay(S.to)}) ma'lumotlarini tahlil qilib javob beradi: leadlar, stadiyalar, manbalar, operatorlar, reklama xarajati.`) +
+    (S.ai.length ? `<div class="space-y-3 mb-4">${msgs}${S.aiBusy ? '<div class="text-sm text-muted">Tahlil qilinyapti…</div>' : ''}</div>` :
+      `<div class="grid sm:grid-cols-2 gap-2 mb-4">${AI_PROMPTS.map(t => `<button onclick="askAI(${esc(JSON.stringify(t))})" class="text-left text-sm rounded-xl border border-line bg-surface2 hover:border-accent px-4 py-3">${esc(t)}</button>`).join('')}</div>`) +
+    `<form onsubmit="event.preventDefault();askAI($('aiQ').value)" class="flex gap-2"><textarea id="aiQ" rows="2" placeholder="Masalan: oktyabrda nega sotuv kam bo'ldi?" class="flex-1 px-3 py-2 rounded-xl bg-surface2 border border-line text-sm resize-none" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();askAI(this.value)}"></textarea>
+      <button ${S.aiBusy ? 'disabled' : ''} class="px-4 rounded-xl bg-accent text-surface text-sm font-semibold"><i class="ph-bold ph-paper-plane-right"></i></button></form>`);
+}
+async function askAI(text) {
+  text = String(text || '').trim(); if (!text || S.aiBusy) return;
+  S.ai.push({ role: 'user', content: text }); S.aiBusy = true; render();
+  const { data, error } = await sbc.functions.invoke('ai-chat', { body: { from: S.from, to: S.to, messages: S.ai.filter(m => !m.error).map(({ role, content }) => ({ role, content })) } });
+  let msg = data?.error || null;
+  if (error && !msg) { try { msg = (await error.context.json()).error; } catch { msg = error.message; } }
+  S.ai.push(msg ? { role: 'assistant', content: msg, error: true } : { role: 'assistant', content: data.answer });
+  S.aiBusy = false; render(); scrollTo(0, document.body.scrollHeight);
+}
+
+// ---- Daily metrics: one saved row per day (daily_metrics, filled by cron at 01:05), today live.
+const div0 = (a, b) => b ? a / b : null;
+const DM = [
+  // [key, title, value(row), format, better: 1 higher / -1 lower / 0 neutral, what it is]
+  ['spend', 'Xarajat $', r => r.spend, 'usd', 0, 'Meta reklama, $'],
+  ['impressions', "Ko'rsatishlar", r => r.impressions, 'num', 1, 'Meta, marta'],
+  ['clicks', 'Bosishlar', r => r.clicks, 'num', 1, 'Meta, barcha bosishlar'],
+  ['ctr', 'CTR %', r => div0(+r.clicks, +r.impressions), 'pct', 1, "bosish ÷ ko'rsatish"],
+  ['cpm', 'CPM $', r => div0(+r.spend * 1000, +r.impressions), 'usd', -1, "1000 ko'rsatish narxi"],
+  ['meta_leads', 'Meta natija (Results)', r => r.meta_leads, 'num', 1, "Ads Manager «Results», forma lidlari"],
+  ['cpl', 'Natija narxi $', r => div0(+r.spend, +r.meta_leads), 'usd', -1, 'xarajat ÷ Meta natija'],
+  ['ad_leads', 'Bitrix lidlar (Target)', r => r.ad_leads, 'num', 1, "Bitrix'ga «Target» bo'lib tushgan"],
+  ['reach', 'Meta → Bitrix %', r => div0(+r.ad_leads, +r.meta_leads), 'pct', 1, "Bitrix lid ÷ Meta natija"],
+  ['all_leads', 'Barcha kanal lidlari', r => r.all_leads, 'num', 1, "Bitrix, barcha manbalar"],
+  ['first_call_min', "1-qo'ng'iroqqacha", r => r.first_call_min, 'min', -1, "daqiqa · Target lid kelgandan 1-qo'ng'iroqqacha, ish vaqti, mediana"],
+  ['unreachable', "Bog'lanib bo'lmadi", r => r.unreachable, 'num', -1, 'Target lidlar, soni'],
+  ['unr_pct', "Bog'lanib bo'lmadi %", r => div0(+r.unreachable, +r.ad_leads), 'pct', -1, 'Target lidlardan'],
+  ['qual', 'Sifatli lid', r => r.qual, 'num', 1, 'Target lidlar, soni'],
+  ['qual_pct', 'Sifatli lid %', r => div0(+r.qual, +r.ad_leads), 'pct', 1, 'Target lidlardan'],
+  ['cpql', 'Sifatli lid narxi $', r => div0(+r.spend, +r.qual), 'usd', -1, 'xarajat ÷ sifatli lid'],
+];
+const fmtM = (v, f) => v == null || !isFinite(v) ? '—' : f === 'usd' ? '$' + (+v).toFixed(2) : f === 'pct' ? pct(v) : f === 'dec' ? (+v).toFixed(1) : f === 'min' ? (+v).toFixed(1) + ' daq' : num(v);
+// Saved rows + live rows for days not saved yet (today), newest first.
+function dmRows() {
+  const saved = Object.fromEntries((S.data.dm || []).map(r => [r.day, r]));
+  for (const r of S.data.dmLive || []) if (!saved[r.day]) saved[r.day] = { ...r, live: true };
+  return Object.values(saved).sort((a, b) => b.day.localeCompare(a.day));
+}
+async function saveNote(day, el) {
+  const { error } = await sbc.from('daily_metrics').update({ note: el.value }).eq('day', day);
+  el.style.borderColor = error ? 'rgb(var(--danger))' : 'rgb(var(--success))';
+  const r = (S.data.dm || []).find(x => x.day === day); if (r && !error) r.note = el.value;
+}
+function metricsPage() {
+  const all = dmRows(), rows = all.filter(r => r.day >= S.from && r.day <= S.to);
+  if (!rows.length) return card(empty("Bu davr uchun saqlangan kun yo'q"));
+  const prev = r => all[all.indexOf(r) + 1];
+  const delta = (r, [, , f, , better]) => {
+    const p = prev(r); if (!p || !better) return '';
+    const a = f(r), b = f(p); if (a == null || b == null || !isFinite(a) || !isFinite(b) || !b) return '';
+    const d = (a - b) / Math.abs(b); if (Math.abs(d) < 0.005) return '';
+    const good = d * better > 0;
+    return `<div class="text-[10.5px] ${good ? 'text-success' : 'text-danger'}">${d > 0 ? '▲' : '▼'} ${Math.abs(d * 100).toFixed(0)}%</div>`;
+  };
+  // Range totals (ratios recomputed from sums, first-call minutes averaged over days).
+  const sum = k => rows.reduce((a, r) => a + (+r[k] || 0), 0);
+  const tot = { spend: sum('spend'), impressions: sum('impressions'), clicks: sum('clicks'), meta_leads: sum('meta_leads'), ad_leads: sum('ad_leads'), all_leads: sum('all_leads'), unreachable: sum('unreachable'), qual: sum('qual'), first_call_min: avgOf(rows, r => r.first_call_min) }; // days' medians averaged
+  const cell = 'px-3 py-2 text-right tabular-nums whitespace-nowrap';
+  return card(h3('Kunlik metrikalar', "Har kuni 01:05 da oxirgi 7 kun avtomatik qayta saqlanadi (kech o'zgargan statuslar ham kiradi). Bugungi qator — jonli. ▲▼ — oldingi kunga nisbatan, yashil yaxshi, qizil yomon. Bitrix lid, bog'lanib bo'lmadi, sifatli lid — faqat «Target» manbasi. 1-qo'ng'iroq: kechasi (20:00–09:00) kelgan lead uchun hisob 09:00 dan boshlanadi; o'rtacha emas mediana — bir nechta juda kech leadlar raqamni buzmasligi uchun. Batafsil — «Yo'riqnoma».") +
+    `<div class="overflow-x-auto -mx-4 sm:-mx-5"><table class="w-full text-[12.5px]"><thead><tr class="text-[11px] text-muted text-left border-b border-line"><th class="px-3 py-2 sticky left-0 bg-surface">Sana</th>${DM.map(([, t, , , , d]) => `<th class="px-3 py-2 text-right font-semibold min-w-[104px] align-bottom" title="${esc(d)}">${t}<div class="font-normal text-[10px] leading-tight mt-0.5 opacity-80">${esc(d)}</div></th>`).join('')}<th class="px-3 py-2 min-w-[220px]">Izoh</th></tr></thead><tbody>
+    <tr class="border-b border-line font-semibold bg-surface2/60"><td class="px-3 py-2 sticky left-0 bg-surface2">Jami / o'rtacha</td>${DM.map(([, , f, fm]) => `<td class="${cell}">${fmtM(f(tot), fm)}</td>`).join('')}<td></td></tr>
+    ${rows.map(r => `<tr class="border-b border-line/50 align-top"><td class="px-3 py-2 sticky left-0 bg-surface whitespace-nowrap">${fmtDay(r.day)}${r.live ? ' ' + chip('jonli', 'info') : ''}</td>${DM.map(m => `<td class="${cell}">${fmtM(m[2](r), m[3])}${delta(r, m)}</td>`).join('')}
+      <td class="px-3 py-1.5">${r.live ? '<span class="text-[11px] text-muted">kun yopilgach</span>' : `<input value="${esc(r.note || '')}" onchange="saveNote('${r.day}', this)" placeholder="Izoh yozing…" class="w-full h-8 px-2 rounded-lg bg-surface2 border border-line text-[12.5px]">`}</td></tr>`).join('')}
+    </tbody></table></div>`);
+}
+
+// ---- Branches: leads, quality, Meta spend and where each source's leads were handed.
+// Branch per lead: the deal's "Filialini tanlang" → the client's form answer → ad naming / where that ad's deals went.
+const BR_SRC = { by_deal: 'sdelkadagi filial', by_form: 'lead formasidagi javob', by_ad: 'reklama (nomi yoki shu reklamaning sdelkalari)' };
+function brMatrix(rows, rowKey, branches, sub) {
+  const by = {}, colTot = {};
+  for (const r of rows) { const o = by[r[rowKey]] ??= { key: r[rowKey], tot: 0, qual: 0 }; o[r.branch] = (o[r.branch] || 0) + +r.leads; o['q:' + r.branch] = (o['q:' + r.branch] || 0) + +r.qual; o.tot += +r.leads; o.qual += +r.qual; colTot[r.branch] = (colTot[r.branch] || 0) + +r.leads; }
+  const list = Object.values(by).sort((a, b) => b.tot - a.tot), max = Math.max(1, ...list.flatMap(o => branches.map(b => o[b] || 0)));
+  const cell = (n, q, tot) => n ? `<div class="rounded-lg px-2 py-1" style="background:rgb(var(--c-blue) / ${(0.06 + 0.5 * n / max).toFixed(2)})"><div class="font-semibold">${num(n)}</div><div class="text-[10.5px] text-muted">${pct(n / tot)}${sub ? ` · ${num(q)} sif.` : ''}</div></div>` : '<span class="text-muted/50">·</span>';
+  return `<div class="overflow-x-auto -mx-4 sm:-mx-5"><table class="w-full text-[12.5px]"><thead><tr class="text-[11px] text-muted border-b border-line"><th class="px-3 py-2 text-left sticky left-0 bg-surface">${rowKey === 'source' ? 'Manba' : 'Kampaniya'}</th><th class="px-3 py-2 text-right">Jami</th>${branches.map(b => `<th class="px-2 py-2 text-right font-semibold">${esc(b)}</th>`).join('')}</tr></thead><tbody>
+    ${list.map(o => `<tr class="border-b border-line/50"><td class="px-3 py-1.5 sticky left-0 bg-surface max-w-[260px] truncate" title="${esc(o.key)}">${esc(o.key)}</td><td class="px-3 py-1.5 text-right tabular-nums font-semibold">${num(o.tot)}<div class="text-[10.5px] text-muted font-normal">${num(o.qual)} sifatli</div></td>${branches.map(b => `<td class="px-1.5 py-1 text-right tabular-nums">${cell(o[b] || 0, o['q:' + b] || 0, o.tot)}</td>`).join('')}</tr>`).join('')}
+    </tbody><tfoot><tr class="border-t-2 border-line font-semibold bg-surface2/50"><td class="px-3 py-2 sticky left-0 bg-surface2">Jami</td><td class="px-3 py-2 text-right tabular-nums">${num(list.reduce((a, o) => a + o.tot, 0))}</td>${branches.map(b => `<td class="px-2 py-2 text-right tabular-nums">${num(colTot[b] || 0)}</td>`).join('')}</tr></tfoot></table></div>`;
+}
+function branchesPage() {
+  const d = S.data, lead = d.brDaily || [], spend = d.brSpend || [];
+  if (!lead.length && !spend.length) return card(empty("Bu davr uchun ma'lumot yo'q"));
+  const isT = r => r.source === 'Target';
+  const by = {};
+  const row = b => by[b] ??= { branch: b, leads: 0, qual: 0, unreachable: 0, came: 0, paid: 0, won: 0, revenue: 0, t_leads: 0, t_qual: 0, t_unr: 0, t_won: 0, spend: 0, impressions: 0, clicks: 0, meta_leads: 0 };
+  for (const r of lead) { const o = row(r.branch); for (const k of ['leads', 'qual', 'unreachable', 'came', 'paid', 'won', 'revenue']) o[k] += +r[k] || 0;
+    if (isT(r)) { o.t_leads += +r.leads; o.t_qual += +r.qual; o.t_unr += +r.unreachable; o.t_won += +r.won; } }
+  for (const r of spend) { const o = row(r.branch); for (const k of ['spend', 'impressions', 'clicks', 'meta_leads']) o[k] += +r[k] || 0; }
+  const UNK = "NOMA'LUM", rows = Object.values(by).sort((a, b) => (a.branch === UNK) - (b.branch === UNK) || b.leads - a.leads);
+  const tot = rows.reduce((t, o) => { for (const k in o) if (k !== 'branch') t[k] = (t[k] || 0) + o[k]; return t; }, { _foot: true });
+  const known = rows.filter(o => o.branch !== UNK);
+  const src = Object.fromEntries(Object.keys(BR_SRC).map(k => [k, lead.reduce((a, r) => a + (+r[k] || 0), 0)]));
+  const usd = v => fmtM(v, 'usd');
+  const c = (t, f, color) => { const mx = Math.max(1, ...known.map(r => +f(r) || 0)); return { t, r: 1, s: r => +f(r) || 0, f: r => r._foot ? num(f(r)) : bar(+f(r) || 0, mx, color) }; };
+  const ratio = (t, f, fm) => ({ t, r: 1, s: r => f(r) ?? -1, f: r => fmtM(f(r), fm) });
+  const cols = [
+    { t: 'Filial', f: r => r._foot ? 'Jami' : r.branch === UNK ? `<span class="text-muted">Aniqlanmagan</span>` : `<span class="font-semibold">${esc(r.branch)}</span>`, s: r => r.branch },
+    c('Barcha leadlar', r => r.leads, 'blue'), c('Sifatli', r => r.qual, 'teal'), ratio('Sifatli %', r => div0(r.qual, r.leads), 'pct'),
+    ratio("Bog'lanib bo'lmadi %", r => div0(r.unreachable, r.leads), 'pct'),
+    c('Target leadlar', r => r.t_leads, 'violet'), c('Target sifatli', r => r.t_qual, 'teal'), ratio('Target sifatli %', r => div0(r.t_qual, r.t_leads), 'pct'),
+    ratio('Xarajat $', r => r.spend, 'usd'), ratio("Ko'rsatishlar", r => r.impressions, 'num'), ratio('Bosishlar', r => r.clicks, 'num'),
+    ratio('CTR %', r => div0(r.clicks, r.impressions), 'pct'), ratio('CPM $', r => div0(r.spend * 1000, r.impressions), 'usd'),
+    ratio('Meta natija', r => r.meta_leads, 'num'), ratio('Natija narxi $ (Meta)', r => div0(r.spend, r.meta_leads), 'usd'),
+    ratio('Target lid narxi $', r => div0(r.spend, r.t_leads), 'usd'), ratio('Sifatli lid narxi $', r => div0(r.spend, r.t_qual), 'usd'),
+    c('Filialga keldi', r => r.came, 'violet'), c('Sotuv', r => r.won, 'green'), ratio('Sotuv narxi $ (Target)', r => div0(r.spend, r.t_won), 'usd'),
+  ];
+  const branches = known.map(o => o.branch).concat(by[UNK] ? [UNK] : []);
+  const topBr = known[0];
+  return `<div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+      ${kpiTile('Filiallar', num(known.length), topBr ? `eng ko'p lead: ${esc(topBr.branch)}` : '', 'blue')}
+      ${kpiTile('Leadlar', num(tot.leads), `${num(tot.t_leads)} tasi Target`, 'violet')}
+      ${kpiTile('Sifatli leadlar', num(tot.qual), pct(div0(tot.qual, tot.leads)), 'teal')}
+      ${kpiTile('Target xarajat', usd(tot.spend), `sifatli lid narxi ${usd(div0(tot.spend, tot.t_qual))}`, 'amber')}
+      ${kpiTile('Filiali aniqlangan', pct(div0(tot.leads - (by[UNK]?.leads || 0), tot.leads)), `${num(by[UNK]?.leads || 0)} lead aniqlanmagan`, 'rose')}
+    </div>
+    ${card(h3('Filiallar kesimi', `Lead qaysi filialga berilgani: ${Object.entries(BR_SRC).map(([k, t]) => `${t} — ${num(src[k])}`).join('; ')}. Meta xarajati reklama nomidagi filialga, nomida filial bo'lmasa — shu reklamadan kelgan leadlar qaysi filiallarga berilgan bo'lsa, o'sha ulushda taqsimlanadi.`) + table(cols, rows, tot), 'mb-6')}
+    ${card(h3('Manbalar → filiallar', "Har bir manbadan kelgan leadlar qaysi filialga berilgani: soni va manba ichidagi ulushi, sifatlilar soni.") + brMatrix(lead, 'source', branches, true), 'mb-6')}
+    ${card(h3('Target kampaniyalar → filiallar', "Faqat «Target» manbasi: har bir kampaniyaning leadlari qaysi filiallarga ketgani.") + brMatrix(d.brCamp || [], 'campaign', branches, true))}`;
+}
+
+// ---- Guide: how each part is computed, plus a live check that the pages agree for the chosen period.
+const GUIDE = [
+  ['Ma\'lumot qayerdan keladi', [
+    ['Bitrix leadlar va deallar', "Har soatda (:15) va «Yangilash» tugmasida. Faqat o'qiladi — Bitrix sozlamalariga tegilmaydi."],
+    ["Bitrix qo'ng'iroqlari", "Har 5 daqiqada. Har bir qo'ng'iroq (javobsizi ham) — aloqa tezligi uchun; 40 soniyadan uzun, yozuvi bor qo'ng'iroqlar — AI tahlili navbatiga."],
+    ['Meta reklama', "Har soatda (:05). Xarajat — reklama kabineti valyutasida ($), so'mga CBU kursi bilan."],
+    ['Kun', "Lead Bitrix'da yaratilgan kun (Toshkent vaqti). Sana oralig'i barcha sahifalarga birdek qo'llanadi."],
+  ]],
+  ['Asosiy tushunchalar', [
+    ['Lead', "Bitrix'dagi har bir lead, barcha manbalar. «Target» — Meta reklamadan kelgan leadlar manbasi."],
+    ['Sifatli lead', "Sozlamalarda belgilangan «sifatli» statuslardan biriga o'tgan lead (deyarli har doim deal ochilgan)."],
+    ["Bog'lanib bo'lmadi", "Lead statusi «Bog'lanib bo'lmadi» yoki «6 marta bog'lanib bo'lmadi»."],
+    ['Sotuv', "Deal hozir «To'lov qildi», «Nabor guruh» yoki «Сделка успешна» bosqichida turibdi. Sana — deal shu 3 bosqichdan biriga BIRINCHI marta o'tgan kun (Bitrix bosqich tarixidan). Keyin «Сделка провалена»ga qaytarilsa, sotuvdan chiqadi. «Umumiy»da Sotuv kartochkasi har bosqichda hozir nechta turganini ko'rsatadi. «Umumiy»da — tanlangan davrda YOPILGAN sotuvlar (lead oldinroq kelgan bo'lishi mumkin). Voronka va filiallarda — shu davr leadlaridan chiqqan sotuvlar."],
+  ]],
+  ['Formulalar', [
+    ['CTR', "Bosishlar ÷ Ko'rsatishlar."], ['CPM', "Xarajat ÷ Ko'rsatishlar × 1000."],
+    ['Meta natija (Results)', "Ads Manager'dagi «Results» ustuni: kampaniya maqsadi bo'yicha natija (lid, xabar va h.k.). Meta bermagan kunlarda lid soni olinadi."], ['Natija narxi (Meta)', "Xarajat ÷ Meta natijalari (Ads Manager'dagi «Cost per result»)."], ['Lead narxi', "Xarajat ÷ Bitrix'ga «Target» bo'lib tushgan leadlar."],
+    ['Meta → Bitrix yetib borish', "Bitrix Target leadlari ÷ Meta natijalari. 100% dan past — formadan Bitrix'ga tushmagan yoki dublikat bo'lib birlashgan lidlar."],
+    ['CPQL (sifatli lid narxi)', "Xarajat ÷ Target'dan sifatli leadlar."],
+    ['Sotuv narxi', "Xarajat ÷ shu davrda yopilgan, Target leadidan chiqqan sotuvlar soni. Masalan $9 122 ÷ 39 = $234. Bu oydagi sotuvlarning bir qismi o'tgan oy leadlaridan, shu oy leadlarining bir qismi esa keyingi oyda sotiladi — shuning uchun oy o'rtasida bu raqam yuqori ko'rinadi."],
+    ['ROMI', "(Target sotuvlari tushumi − xarajat so'mda) ÷ xarajat so'mda."],
+  ]],
+  ["Aloqa tezligi (1-qo'ng'iroq)", [
+    ['Kutish (ish vaqti)', "Lead kelgandan birinchi qo'ng'iroqqacha (javob berilmagan qo'ng'iroq ham hisob). 20:00–09:00 oralig'ida kelgan lead uchun hisob ertalab 09:00 dan boshlanadi — tunda kutgan vaqt operatorga yozilmaydi."],
+    ['Nega mediana', "O'rtacha bir nechta juda kech qo'ng'iroq qilingan leadlardan keskin oshadi (masalan, kechasi kelib, ertasi kuni tushda qo'ng'iroq qilingan lead 600+ daqiqa beradi). Mediana — leadlarning yarmi shundan tezroq qo'ng'iroq olgan vaqt."],
+    ['Kunlik metrikalardagi qiymat', "Faqat Target leadlari, ish vaqti bo'yicha mediana. Qo'ng'iroqlar kechikib yuklansa, saqlangan kunlar har soatda avtomatik tuzatiladi."],
+  ]],
+  ['Filiallar', [
+    ['Lead qaysi filialga', "1) dealdagi «Filialini tanlang» maydoni; 2) bo'lmasa — mijoz lead formasida yozgan shahar/filial; 3) bo'lmasa — reklama nomidagi filial yoki shu reklamadan kelgan dealar ko'pchiligi (≥60%) ketgan filial; 4) qolgani — «Aniqlanmagan»."],
+    ['Xarajat filialga', "Reklama to'plami nomida filial bo'lsa — to'liq o'sha filialga. Bo'lmasa — shu reklamadan kelgan leadlar qaysi filiallarga berilgan bo'lsa, o'sha ulushda bo'linadi."],
+  ]],
+  ['Avtomatik ishlar', [
+    ['01:05', "Kunlik metrikalar: oxirgi 7 kun qayta saqlanadi."], ['07:00', "Telegram'ga kunlik hisobot."],
+    ['11:20, 15:20, 19:20, 23:20', "Telegram'ga holat hisoboti."], ['Har 5 daqiqa', "Qo'ng'iroqlar sinxroni va AI tahlili (bepul Gemini limiti tugasa — ertasi kuni davom etadi)."],
+  ]],
+];
+function guidePage() {
+  const d = S.data, inR = r => r.day >= S.from && r.day <= S.to, sum = (rows, f) => rows.reduce((a, r) => a + (+f(r) || 0), 0);
+  const daily = d.daily || [], tgt = daily.filter(r => r.source === 'Target'), dm = dmRows().filter(inR), br = d.brDaily || [], brT = br.filter(r => r.source === 'Target');
+  const checks = [
+    ['Jami leadlar', sum(daily, r => r.leads), sum(dm, r => r.all_leads), sum(br, r => r.leads)],
+    ['Target leadlar', sum(tgt, r => r.leads), sum(dm, r => r.ad_leads), sum(brT, r => r.leads)],
+    ['Target sifatli', sum(tgt, r => r.qual), sum(dm, r => r.qual), sum(brT, r => r.qual)],
+    ['Barcha sifatli', sum(daily, r => r.qual), null, sum(br, r => r.qual)],
+    ['Xarajat $', sum(d.spend || [], r => r.spend), sum(dm, r => r.spend), sum(d.brSpend || [], r => r.spend)],
+    ['Meta natija', sum(d.spend || [], r => r.meta_leads), sum(dm, r => r.meta_leads), sum(d.brSpend || [], r => r.meta_leads)],
+  ];
+  const f = (v, k) => v == null ? '<span class="text-muted">—</span>' : k.includes('$') ? '$' + (+v).toFixed(2) : num(v);
+  const ok = r => { const xs = r.slice(1).filter(v => v != null); return xs.every(v => Math.abs(v - xs[0]) < 0.01 * Math.max(1, Math.abs(xs[0]))); };
+  const checkCard = card(h3("Raqamlar mosligi", `Tanlangan davr (${fmtDay(S.from)} — ${fmtDay(S.to)}) uchun bir xil ko'rsatkich uch sahifada qanday chiqyapti. Farq bo'lsa — odatda bugungi kun hali saqlanmagani yoki sinxronizatsiya davom etayotgani; «Yangilash»ni bosing.`) + table([
+    { t: "Ko'rsatkich", f: r => r[0] }, { t: 'Umumiy / Kunlar', r: 1, f: r => f(r[1], r[0]) }, { t: 'Kunlik metrikalar', r: 1, f: r => f(r[2], r[0]) },
+    { t: 'Filiallar', r: 1, f: r => f(r[3], r[0]) }, { t: 'Holat', f: r => ok(r) ? chip('mos', 'success') : chip('farq bor', 'danger') },
+  ], checks), 'mb-6');
+  return checkCard + `<div class="grid lg:grid-cols-2 gap-4">${GUIDE.map(([title, items]) => card(h3(title) + items.map(([k, v]) =>
+    `<div class="py-2 border-b border-line/50 last:border-0"><div class="text-[13px] font-semibold">${k}</div><div class="text-[13px] text-muted mt-0.5 leading-relaxed whitespace-normal">${v}</div></div>`).join(''))).join('')}</div>`;
+}
+
+// ---- Speed to lead: minutes from lead creation to the first call (any direction, answered or not).
+const tkTime = t => t ? new Date(t).toLocaleString('sv-SE', { timeZone: 'Asia/Tashkent' }).slice(5, 16) : '—';
+function speedPage() {
+  // minutes = working-time wait (a night lead counts from 09:00); raw = clock time since the lead arrived.
+  const all = (S.data.speed || []).filter(r => !S.source || r.source === S.source).map(r => ({ ...r, raw: r.minutes, minutes: r.work_minutes ?? r.minutes }));
+  if (!all.length) return card(empty("Hali ma'lumot yo'q: qo'ng'iroqlar tarixi yuklanmoqda (bir necha daqiqa)."));
+  const called = all.filter(r => r.minutes != null), notCalled = all.filter(r => r.first_call_at == null);
+  const med = xs => { const a = xs.map(Number).sort((x, y) => x - y); return a.length ? (a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2) : null; };
+  const share = (xs, m) => xs.length ? xs.filter(r => +r.minutes <= m).length / xs.length : null;
+  const work = called.filter(r => r.hour >= 9 && r.hour < 20);
+  const fm = v => v == null ? '—' : v < 60 ? `${(+v).toFixed(1)} daq` : `${(v / 60).toFixed(1)} soat`;
+  const group = (key, name) => Object.values(all.reduce((m, r) => { const k = r[key] ?? '—'; const o = m[k] ??= { k, name: name(k), n: 0, xs: [], none: 0 }; o.n++; if (r.minutes != null) o.xs.push(+r.minutes); else if (!r.first_call_at) o.none++; return m; }, {}))
+    .map(o => ({ ...o, avg: o.xs.length ? o.xs.reduce((a, b) => a + b, 0) / o.xs.length : null, med: med(o.xs), in5: o.xs.length ? o.xs.filter(x => x <= 5).length / o.xs.length : null }));
+  const cols = first => [{ t: first, f: r => esc(r.name) }, { t: 'Leadlar', r: 1, f: r => num(r.n) }, { t: "O'rtacha", r: 1, f: r => fm(r.avg) }, { t: 'Mediana', r: 1, f: r => fm(r.med) }, { t: '5 daq ichida', r: 1, f: r => pct(r.in5) }, { t: "Qo'ng'iroq qilinmagan", r: 1, f: r => r.none ? chip(num(r.none), 'danger') : '0' }];
+  const hours = group('hour', h => `${String(h).padStart(2, '0')}:00`).sort((a, b) => a.k - b.k), maxMed = Math.max(...hours.map(h => h.med || 0), 1);
+  return `<div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">${kpiTile('Mediana', fm(med(called.map(r => r.minutes))), `ish vaqti bo'yicha · soat bo'yicha: ${fm(med(called.map(r => +r.raw)))}`, 'blue')}${kpiTile("O'rtacha", fm(avgOf(called, r => +r.minutes)), `ish vaqti · 09–20 da kelganlar medianasi ${fm(med(work.map(r => r.minutes)))}`, 'amber')}${kpiTile('5 daqiqa ichida', pct(share(called, 5)), 'eng yaxshi amaliyot', 'green')}${kpiTile('1 soat ichida', pct(share(called, 60)), '', 'teal')}${kpiTile("Qo'ng'iroq qilinmagan", num(notCalled.length), `${num(all.length)} leaddan`, 'rose')}</div>
+  ${speedExplain(called, notCalled, all, med, fm)}
+  <div class="grid lg:grid-cols-2 gap-4 mb-6">${card(h3('Manbalar bo\'yicha', "«Звонок» va filial orqali kelgan leadlarda 0 daqiqa — mijozning o'zi qo'ng'iroq qilgan, kutish yo'q.") + table(cols('Manba'), group('source', k => k).sort((a, b) => b.n - a.n)))}
+  ${card(h3("Lead kelgan soat bo'yicha", 'Mediana, daqiqa — kechasi kelgan leadlar ertalab qo\'ng\'iroq qilinadi') + hours.map(h => `<div class="flex items-center justify-between gap-3 py-1 text-[12.5px]"><span class="tabular-nums w-12">${h.name}</span>${bar(h.med || 0, maxMed, (h.med ?? 0) <= 5 ? 'green' : (h.med ?? 0) <= 30 ? 'amber' : 'rose', fm(h.med))}<span class="text-muted tabular-nums w-10 text-right">${num(h.n)}</span></div>`).join(''))}</div>
+  ${card(h3("Operatorlar bo'yicha", "Leadga birinchi qo'ng'iroq qilgan operator") + table(cols('Operator'), group('first_operator', id => opNameOf(id)).filter(o => o.k !== '—').sort((a, b) => b.n - a.n)), 'mb-6')}
+  ${card(h3("Kunlar bo'yicha", "Har bir kun leadlari: qanchasiga qo'ng'iroq qilindi va qancha kutishdi") + table([
+    { t: 'Kun', f: r => fmtDay(r.k), s: r => r.k }, { t: 'Leadlar', r: 1, f: r => num(r.n) }, { t: "Qo'ng'iroq qilindi", r: 1, f: r => num(r.xs.length) },
+    { t: 'Javob berdi', r: 1, f: r => num(r.ans) }, { t: "Qo'ng'iroq qilinmagan", r: 1, f: r => r.none ? chip(num(r.none), 'danger') : '0' },
+    { t: '5 daq ichida', r: 1, f: r => pct(r.in5) }, { t: 'Mediana (ish vaqti)', r: 1, f: r => fm(r.med) }, { t: "O'rtacha (ish vaqti)", r: 1, f: r => fm(r.avg) },
+  ], group('day', k => k).map(o => ({ ...o, ans: all.filter(r => r.day === o.k && r.first_answer_at).length })).sort((a, b) => b.k.localeCompare(a.k))), 'mb-6')}
+  ${card(h3('Barcha leadlar — aloqa kesimi', `Tanlangan davrdagi har bir lead (${num(all.length)} ta${S.source ? ', manba: ' + esc(S.source) : ''}). Bitta kunni tanlasangiz — o'sha kunning hammasi. Lead raqamini bosing — Bitrix'da ochiladi.`) + table([
+    { t: 'Lead', f: r => `<a href="${BX_LEAD(r.bitrix_id)}" target="_blank" rel="noopener" class="text-accent hover:underline">#${r.bitrix_id}</a>` },
+    { t: 'Kelgan', f: r => tkTime(r.created_at), s: r => r.created_at }, { t: 'Manba', f: r => esc(r.source) }, { t: "Mas'ul", f: r => esc(opNameOf(r.manager_id)) },
+    { t: "1-qo'ng'iroq", f: r => r.first_call_at ? tkTime(r.first_call_at) : chip("qilinmagan", 'danger'), s: r => r.first_call_at || '' },
+    { t: 'Kutish (ish vaqti)', r: 1, f: r => r.minutes == null ? '—' : chip(fm(r.minutes), r.minutes <= 5 ? 'success' : r.minutes <= 30 ? 'warn' : 'danger'), s: r => r.minutes ?? 1e9 },
+    { t: 'Kutish (soat)', r: 1, f: r => fm(r.raw), s: r => r.raw ?? 1e9 }, { t: "Qo'ng'iroqlar", r: 1, f: r => num(r.calls) },
+    { t: 'Javob berdi', f: r => r.first_answer_at ? tkTime(r.first_answer_at) : '<span class="text-muted">yo\'q</span>', s: r => r.first_answer_at || '' },
+    { t: 'Holat', f: r => esc(r.status_name || r.status) },
+  ], [...all].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))), null, S.speedLimit) +
+    (all.length > S.speedLimit ? `<button onclick="S.speedLimit+=300;render()" class="mt-3 h-9 px-4 rounded-xl bg-surface2 text-sm font-semibold">Yana ko'rsatish (${num(all.length - S.speedLimit)} qoldi)</button>` : ''))}`;
+}
+
+// Plain-language median plus how many leads waited how long, so the KPI is easy to check.
+function speedExplain(called, notCalled, all, med, fm) {
+  const m = med(called.map(r => r.minutes)), avg = avgOf(called, r => +r.minutes);
+  const B = [['5 daqiqagacha', 0, 5, 'green'], ['5–15 daqiqa', 5, 15, 'teal'], ['15–30 daqiqa', 15, 30, 'amber'], ['30–60 daqiqa', 30, 60, 'amber'], ['1–3 soat', 60, 180, 'rose'], ['3 soatdan ko\'p', 180, Infinity, 'rose']];
+  const rows = B.map(([t, lo, hi, c]) => ({ t, c, n: called.filter(r => +r.minutes > lo - (lo ? 0 : 1) && +r.minutes <= hi).length }));
+  rows.push({ t: "Qo'ng'iroq qilinmagan", c: 'crimson', n: notCalled.length });
+  const max = Math.max(1, ...rows.map(r => r.n));
+  return `<div class="grid lg:grid-cols-2 gap-4 mb-6">${card(h3('Mediana nima va bu raqam nimani bildiradi') + `<div class="text-[13.5px] space-y-2.5">
+      <p><b>Mediana = ${fm(m)}.</b> Qo'ng'iroq qilingan ${num(called.length)} ta leadni kutish vaqti bo'yicha qatorga tizsak, aynan o'rtadagi lead ${fm(m)} kutgan. Ya'ni <b>leadlarning yarmiga ${fm(m)} dan tez</b>, qolgan yarmiga sekinroq qo'ng'iroq qilingan.</p>
+      <p><b>O'rtacha = ${fm(avg)}.</b> Bir nechta juda kech qo'ng'iroq (masalan, ertasi kuni) o'rtachani ko'tarib yuboradi. Shuning uchun asosiy ko'rsatkich — mediana: u «odatdagi» leadni ko'rsatadi.</p>
+      <p><b>Ish vaqti bo'yicha</b> hisoblanadi: lead 20:00–09:00 orasida kelsa, kutish ertalab 09:00 dan sanaladi (operator tunda ishlamaydi). Soat bo'yicha (tun ham hisoblanganda) qiymat KPI kartochkasi ostida yozilgan.</p>
+      <p class="text-muted text-[12.5px]">Maqsad: mediana 5 daqiqadan past va «3 soatdan ko'p» + «qo'ng'iroq qilinmagan» — nolga yaqin.</p></div>`)}
+    ${card(h3('Leadlar qancha kutdi', `${num(all.length)} ta lead — kutish oralig'i bo'yicha. Medianani shu yerdan tekshirish mumkin: yuqoridan sanab yarmiga yetgan qator.`) + rows.map(r => `<div class="flex items-center justify-between gap-3 py-1.5 text-[13px]"><span class="w-40 shrink-0">${r.t}</span>${bar(r.n, max, r.c, num(r.n))}<span class="text-muted tabular-nums w-14 text-right">${pct(div(r.n, all.length))}</span></div>`).join(''))}</div>`;
+}
+
+// ---- Status & reminders: sync health, AI queue, saved days, and alerts from the daily metrics.
+function statusPage() {
+  const d = S.data, now = Date.now(), ago = t => t ? Math.round((now - new Date(t)) / 60000) : null;
+  const fmtAgo = m => m == null ? 'hech qachon' : m < 60 ? `${m} daq oldin` : m < 1440 ? `${Math.round(m / 60)} soat oldin` : `${Math.round(m / 1440)} kun oldin`;
+  const SRC = { bitrix_leads: ['Bitrix leadlar', 90], bitrix_deals: ['Bitrix deallar', 90], bitrix_won_history: ['Bitrix sotuvlar tarixi', 90], meta: ['Meta reklama', 90], bitrix_calls: ["Bitrix qo'ng'iroqlar", 20] };
+  const syncRows = (d.sync || []).filter(r => SRC[r.source]).map(r => { const m = ago(r.last_run_at); return { ...r, m, name: SRC[r.source][0], ok: !r.last_error && m != null && m <= SRC[r.source][1] }; });
+  const saved = (d.dm || [])[0], qd = d.queue || {};
+  // Alerts: yesterday vs the 7 saved days before it.
+  const rows = dmRows().filter(r => !r.live), y = rows[0], base = rows.slice(1, 8), alerts = [];
+  const avg = f => avgOf(base, r => { const v = f(r); return v != null && isFinite(v) ? v : null; });
+  const rule = (key, thr, msg, action) => {
+    const m = DM.find(x => x[0] === key), v = y && m[2](y), b = avg(m[2]);
+    if (v == null || b == null || !isFinite(v) || !b) return;
+    const ch = (v - b) / Math.abs(b);
+    if (ch * m[4] < -thr) alerts.push({ level: Math.abs(ch) > thr * 2 ? 'danger' : 'warn', title: `${m[1]}: ${fmtM(v, m[3])} (7 kunlik o'rtacha ${fmtM(b, m[3])}, ${ch > 0 ? '+' : ''}${(ch * 100).toFixed(0)}%)`, msg, action });
+  };
+  rule('cpl', 0.2, "Meta natija narxi oshdi.", "Kreativlar sahifasida CPL eng oshgan reklamani toping; chastota >3 bo'lsa kreativni yangilang.");
+  rule('qual_pct', 0.2, 'Sifatli lid ulushi tushdi.', "Lead tahlilida sifatsiz sabablarni (boshqa viloyat, yosh, SPAM) tekshiring; formaga savol qo'shing.");
+  rule('unr_pct', 0.2, "Bog'lanib bo'lmaganlar ko'paydi.", "Aloqa tezligi sahifasini tekshiring: kechikkan qo'ng'iroqlar va operator yuklamasi.");
+  rule('first_call_min', 0.3, "Birinchi qo'ng'iroq kechikmoqda.", 'Yangi leadlarga 5 daqiqa ichida qo\'ng\'iroq qilishni nazorat qiling.');
+  rule('reach', 0.15, "Meta leadlari Bitrix'ga kamroq yetib bormoqda.", "Meta forma → Bitrix integratsiyasini tekshiring (dublikat yoki yo'qolgan leadlar).");
+  rule('cpql', 0.25, 'Sifatli lid narxi oshdi.', "Budjetni CPQL eng past reklamalarga o'tkazing.");
+  const todayNotCalled = (d.speed || []).filter(r => !r.first_call_at && r.source === 'Target' && now - new Date(r.created_at) > 15 * 60000 && r.day === iso(new Date())).length;
+  if (todayNotCalled) alerts.unshift({ level: 'danger', title: `Bugun ${todayNotCalled} ta reklama leadiga hali qo'ng'iroq qilinmagan (15 daqiqadan ko'p)`, msg: '', action: "Aloqa tezligi → «Qo'ng'iroq qilinmagan leadlar» ro'yxatini oching." });
+  if (qd.failed > 20) alerts.push({ level: 'warn', title: `AI tahlilida ${qd.failed} ta qo'ng'iroq xato bilan to'xtagan`, msg: "Odatda bepul Gemini kunlik limiti tugaganda bo'ladi; ertasi kuni avtomatik qayta uriniladi.", action: '' });
+  for (const r of syncRows.filter(r => !r.ok)) alerts.push({ level: 'danger', title: `${r.name} sinxronizatsiyasi to'xtagan (${fmtAgo(r.m)})`, msg: r.last_error ? esc(r.last_error).slice(0, 200) : '', action: '' });
+  const tone = { danger: 'border-danger/40 bg-danger/5', warn: 'border-warn/40 bg-warn/5', info: 'border-line' };
+  return `<div class="grid lg:grid-cols-3 gap-4 mb-6">
+    ${card(h3("Ma'lumot oqimi", 'Oxirgi sinxronizatsiya') + syncRows.map(r => `<div class="flex justify-between gap-3 py-1.5 text-[13px] border-b border-line/50 last:border-0"><span>${r.ok ? '🟢' : '🔴'} ${r.name}</span><span class="text-muted">${fmtAgo(r.m)}</span></div>`).join(''))}
+    ${card(h3("AI qo'ng'iroq tahlili", 'Oxirgi 3 kun') + [["Navbatda", qd.pending], ["Oxirgi 24 soatda tahlil qilindi", qd.done24], ['Xato (qayta uriniladi)', qd.failed]].map(([t, v]) => `<div class="flex justify-between gap-3 py-1.5 text-[13px] border-b border-line/50 last:border-0"><span>${t}</span><b class="tabular-nums">${num(v)}</b></div>`).join(''))}
+    ${card(h3('Kunlik metrikalar', 'Avto-saqlash har kuni 01:05 da') + `<div class="text-[13px] py-1.5">Oxirgi saqlangan kun: <b>${saved ? fmtDay(saved.day) : '—'}</b></div><div class="text-[13px] py-1.5 text-muted">Saqlangan vaqti: ${saved ? fmtAgo(ago(saved.saved_at)) : '—'}</div><div class="text-[13px] py-1.5 text-muted">Jami saqlangan kunlar: ${num((d.dm || []).length)}</div>`)}
+  </div>
+  ${card(h3('Eslatmalar', y ? `Kecha (${fmtDay(y.day)}) oldingi 7 kunlik o'rtacha bilan solishtirildi` : '') + (alerts.length ? alerts.map(a => `<div class="rounded-2xl border ${tone[a.level]} p-4 mb-3 last:mb-0"><div class="font-semibold text-[13.5px]">${a.level === 'danger' ? '🔴' : '🟠'} ${a.title}</div>${a.msg ? `<div class="text-[13px] mt-1">${a.msg}</div>` : ''}${a.action ? `<div class="text-[13px] mt-1 text-accent"><i class="ph-bold ph-arrow-right"></i> ${a.action}</div>` : ''}</div>`).join('') : `<div class="text-[13px] py-4">✅ Hammasi me'yorida: kechagi ko'rsatkichlar 7 kunlik o'rtachadan sezilarli yomonlashmagan.</div>`))}`;
+}
+
+const VIEWS = { overview, funnel, daily, leads, money: moneyPage, cohort, creatives, pains, managers, calls, speed: speedPage, metrics: metricsPage, branches: branchesPage, status: statusPage, guide: guidePage, briefs, ai, settings };
+function render() { $('app').innerHTML = shell(S.data.funnel ? VIEWS[S.page]() : card(empty('Yuklanmoqda…'))); }
+// Starts the Meta / Bitrix / call syncs now (sync-now waits up to ~55 s), then reloads the data.
+async function syncNow() {
+  S.syncing = true; render();
+  try {
+    const { data } = await sbc.auth.getSession();
+    const res = await fetch(`${SB_URL}/functions/v1/sync-now`, { method: 'POST', headers: { authorization: `Bearer ${data.session?.access_token}`, apikey: SB_KEY } });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || res.status);
+  } catch (e) { alert("Yangilab bo'lmadi: " + e.message); }
+  S.syncing = false; await refresh();
+}
+async function refresh() {
+  $('app').innerHTML = shell(card(empty('Yuklanmoqda…')));
+  try { await load(); render(); } catch (e) { $('app').innerHTML = shell(card(`<p class="text-sm text-danger">${esc(e.message)}</p>`)); }
+}
+
+function loginScreen(err = '') {
+  $('app').innerHTML = `<div class="min-h-screen flex items-center justify-center px-4"><form onsubmit="login(event)" class="w-full max-w-sm bg-surface border border-line rounded-2xl shadow-card p-6 space-y-4">
+    <div><h1 class="text-xl font-bold">Sotuv auditi</h1><p class="text-xs text-muted mt-1">Admin akkaunti bilan kiring</p></div>
+    <input id="lgEmail" type="email" required placeholder="Email" autocomplete="email" class="w-full h-11 px-3 rounded-xl bg-surface2 border border-line text-sm">
+    <input id="lgPass" type="password" required placeholder="Parol" autocomplete="current-password" class="w-full h-11 px-3 rounded-xl bg-surface2 border border-line text-sm">
+    ${err ? `<p class="text-xs text-danger">${esc(err)}</p>` : ''}
+    <button class="w-full h-11 rounded-xl bg-fg text-surface text-sm font-semibold">Kirish</button></form></div>`;
+}
+async function login(e) {
+  e.preventDefault();
+  const { error } = await sbc.auth.signInWithPassword({ email: $('lgEmail').value.trim(), password: $('lgPass').value });
+  if (error) return loginScreen(error.message);
+  boot();
+}
+async function boot() {
+  const { data } = await sbc.auth.getSession();
+  if (!data.session) return loginScreen();
+  const { data: ok } = await sbc.rpc('is_admin');
+  if (!ok) { await sbc.auth.signOut(); return loginScreen('Bu akkaunt admin emas.'); }
+  refresh();
+}
+boot();
+</script>
+</body>
+</html>

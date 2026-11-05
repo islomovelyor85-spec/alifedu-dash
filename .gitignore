@@ -1,0 +1,9 @@
+# Only the sales-audit dashboard and its Supabase backend are in this repo.
+/*
+!/.gitignore
+!/README.md
+!/dash/
+!/supabase/
+.DS_Store
+.env*
+supabase/.temp/
