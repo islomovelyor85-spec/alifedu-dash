@@ -175,12 +175,12 @@ const PAGES = NAV.flatMap(([, items]) => items);
 
 // Pages through results: the API returns at most 1000 rows per request.
 // A failing view is retried once, then left empty with a warning, so one slow query never blanks the whole platform.
-async function q(table, build = x => x) {
+async function q(table, build = x => x, cols = '*') {
   for (let attempt = 0; ; attempt++) {
     const out = [];
     try {
       for (let from = 0; ; from += 1000) {
-        const { data, error } = await build(sbc.from(table).select('*')).range(from, from + 999);
+        const { data, error } = await build(sbc.from(table).select(cols)).range(from, from + 999);
         if (error) throw new Error(error.message);
         out.push(...data);
         if (data.length < 1000) return out;
@@ -205,6 +205,8 @@ async function queueStats() {
   return { pending, failed, done24 };
 }
 
+// Dialog text is most of the volume, so it is fetched only when a call is opened.
+const CALL_COLS = 'call_id,call_start,operator_id,direction,duration,lead_id,deal_id,model,summary,outcome,interest,score,objections,mistakes,good,next_step,advice,error,analyzed_at,record_file_id,rubric,stages,total,mistakes_detail,fab_note,socratic_note,script_note,call_type,requeue,pains';
 async function load() {
   S.warn = [];
   const day = x => x.gte('day', S.from).lte('day', S.to);
@@ -219,7 +221,7 @@ async function load() {
     q('crm_statuses', x => x.eq('entity', 'USER')).then(r => Object.fromEntries(r.map(u => [u.status_id, u.name]))),
     q('v_deal_stages', day), q('v_lead_hours', day), q('v_lead_codes', day), q('v_daily_outcomes', day), q('v_operator_outcomes', day), q('v_status_outcomes', day), q('v_sales_cycle', day), q('v_deal_money', day), q('v_deal_lost_reasons', day), q('v_cohort_summary'), q('v_cohort_src'), q('v_spend_daily', day),
     q('ad_daily', x => x.gte('date', S.from).lte('date', S.to)), q('v_ad_leads', day), q('v_ad_catalog'), q('v_won_daily', day), q('v_sales_by_month', x => x.gte('sale_month', '2026-07-01')),
-    q('call_review', x => x.gte('call_start', S.from).lte('call_start', S.to + 'T23:59:59').order('call_start', { ascending: false })),
+    q('call_review', x => x.gte('call_start', S.from).lte('call_start', S.to + 'T23:59:59').order('call_start', { ascending: false }), CALL_COLS),
     q('v_speed_to_lead', day), q('daily_metrics', x => x.order('day', { ascending: false })),
     q('v_daily_metrics', x => x.gte('day', iso(addDays(new Date(), -1)))), queueStats(),
     q('v_branch_daily', day), q('v_branch_spend_daily', day), q('v_branch_campaign', day),
@@ -794,7 +796,7 @@ const avgOf = (rows, f) => { const xs = rows.map(f).filter(v => v != null && isF
 const go = (op, call) => `onclick="S.op=${op == null ? 'null' : `'${esc(String(op)).replace(/'/g, "\\'")}'`};S.call=${call == null ? 'null' : `'${esc(call)}'`};render();scrollTo(0,0)"`;
 const crumbs = (...parts) => `<div class="flex flex-wrap items-center gap-1.5 text-[13px] text-muted mb-4">${parts.map(([t, on]) => on ? `<button ${on} class="hover:text-fg underline-offset-2 hover:underline">${t}</button>` : `<span class="text-fg font-semibold">${t}</span>`).join('<i class="ph-bold ph-caret-right text-[10px]"></i>')}</div>`;
 const kpiTile = (l, v, sub, color) => `<div class="bg-surface rounded-3xl p-5"><div class="text-[11px] font-semibold tracking-wide uppercase" style="color:rgb(var(--c-${color}))">${l}</div><div class="text-[28px] leading-tight font-bold mt-1 tabular-nums">${v}</div>${sub ? `<div class="text-[11px] text-muted mt-1">${sub}</div>` : ''}</div>`;
-const analysed = () => (S.data.calls || []).filter(r => r.transcript && r.rubric);
+const analysed = () => (S.data.calls || []).filter(r => r.rubric);
 const isSale = c => !c.call_type || c.call_type === 'sotuv';
 
 // One row per manager for the selected dates: CRM outcomes + call scores.
@@ -881,6 +883,7 @@ async function requeueCall(id) {
 function callDetail() {
   const c = (S.data.calls || []).find(x => x.call_id === S.call);
   if (!c) return crumbs(['Menejerlar', go(null)]) + card(empty("Qo'ng'iroq topilmadi (sana oralig'ini tekshiring)"));
+  if (c.transcript === undefined && !c.dialogLoading) { c.dialogLoading = true; sbc.from('call_review').select('transcript').eq('call_id', c.call_id).maybeSingle().then(({ data }) => { c.transcript = data?.transcript ?? ''; render(); }); }
   const name = opNameOf(c.operator_id), key = S.op ?? normName(name), byCode = Object.fromEntries((c.rubric || []).map(r => [r.code, r]));
   const back = S.page === 'calls' ? ["Qo'ng'iroqlar tahlili", go(null)] : ['Menejerlar', go(null)];
   const note = (t, v) => v ? `<div class="py-2"><div class="text-[11px] uppercase tracking-wide text-muted font-semibold mb-0.5">${t}</div><div class="text-[13px]">${esc(v)}</div></div>` : '';
@@ -891,7 +894,7 @@ function callDetail() {
     <div class="grid lg:grid-cols-2 gap-4 mb-6">${card(h3('Xulosa') + `<div class="text-[13px] mb-2">${esc(c.summary)}</div>` + note('SPIN va Sokrat', c.socratic_note) + note('FAB', c.fab_note) + note('Skript (Miro)', c.script_note) + note('Keyingi qadam', c.next_step) + note("E'tirozlar", (c.objections || []).join(', ')) + note('Yaxshi tomonlari', (c.good || []).join(', ')) + `<div class="mt-2 text-[13px] text-accent"><i class="ph-bold ph-lightbulb"></i> ${esc(c.advice)}</div>`)}
     ${card(h3('Xatolar', "Qayerda va o'rniga nima deyish kerak edi") + ((c.mistakes_detail || []).length ? c.mistakes_detail.map(m => `<div class="py-2 border-b border-line/60 last:border-0 text-[13px]"><div class="flex gap-2"><span class="text-muted tabular-nums shrink-0">${esc(m.moment)}</span><span class="font-semibold">${esc(m.problem)}</span></div><div class="text-accent mt-1"><i class="ph-bold ph-chat-teardrop-text"></i> ${esc(m.better)}</div></div>`).join('') : empty("Xato topilmadi")))}</div>
     ${card(h3('Reglament bo\'yicha baho', 'Har bir mezon: ball / maksimum va dalil (qo\'ng\'iroqdan iqtibos)') + RUBRIC.map(([st, t, items]) => `<div class="mt-3 first:mt-0"><div class="flex justify-between text-[13px] font-semibold mb-1"><span>${t}</span><span class="tabular-nums">${c.stages?.[st] == null ? "tegishli emas" : c.stages[st] + '%'}</span></div>${items.map(([code, max, text]) => { const r = byCode[code] || {}; const na = r.applicable === false; return `<div class="grid grid-cols-[1fr_auto] gap-x-3 py-1 text-[12.5px] border-b border-line/40 last:border-0"><span>${esc(text)}</span><span class="tabular-nums font-semibold ${na ? 'text-muted' : (r.points || 0) >= max ? 'text-success' : (r.points || 0) > 0 ? 'text-warn' : 'text-danger'}">${na ? '—' : `${r.points ?? 0}/${max}`}</span>${r.evidence && !na ? `<span class="col-span-2 text-muted italic">«${esc(r.evidence)}»</span>` : ''}</div>`; }).join('')}</div>`).join(''), 'mb-6')}
-    ${card(h3('Dialog', "AI yozib olgan matn: chapda mijoz, o'ngda operator (shaxsiy ma'lumotlar yashirilgan)") + dialog(c.transcript))}`;
+    ${card(h3('Dialog', "AI yozib olgan matn: chapda mijoz, o'ngda operator (shaxsiy ma'lumotlar yashirilgan)") + (c.transcript === undefined ? empty('Yuklanmoqda…') : dialog(c.transcript)))}`;
 }
 
 function rubricCard() {
@@ -905,7 +908,7 @@ function rubricCard() {
 function calls() {
   if (S.call) return callDetail();
   const all = S.data.calls || [], ok = analysed(), sales = ok.filter(isSale);
-  const queued = all.filter(r => !r.transcript && !r.error).length, failed = all.filter(r => !r.transcript && r.error).length;
+  const queued = all.filter(r => !r.rubric && !r.error).length, failed = all.filter(r => !r.rubric && r.error).length;
   const F = S.callF ||= { type: 'sotuv', low: false };
   const top = (xs, k, n = 8) => Object.entries(xs.flatMap(r => r[k] || []).reduce((m, x) => (m[x.toLowerCase()] = (m[x.toLowerCase()] || 0) + 1, m), {})).sort((a, b) => b[1] - a[1]).slice(0, n);
   const list = (t, sub, rows, color) => card(h3(t, sub) + (rows.length ? rows.map(([x, n]) => `<div class="flex items-center justify-between gap-3 py-1.5 border-b border-line/60 last:border-0 text-[13px]"><span>${esc(x)}</span>${bar(n, rows[0][1], color, num(n))}</div>`).join('') : empty("Ma'lumot yo'q")));
