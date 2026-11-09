@@ -37,7 +37,7 @@ const SB_KEY = 'sb_publishable_CaFqJ6b9MBQf-WUbf2wepw_9VDbDjqc';
 const sbc = window.supabase.createClient(SB_URL, SB_KEY);
 // One app, two panels: reports for everyday work, /admin for setup and people.
 const ADMIN = location.pathname.startsWith('/admin') || new URLSearchParams(location.search).has('admin');
-const SWITCH_URL = ADMIN ? (location.search ? location.pathname : '/') : (location.hostname.startsWith('dash.') ? '/admin' : '?admin');
+const SWITCH_URL = ADMIN ? (location.search ? location.pathname : '/') : (location.hostname.startsWith('dash.') ? '/admin/' : '?admin');
 if (ADMIN) document.title = 'Admin panel';
 let theme = null; try { theme = localStorage.getItem('audit-theme'); } catch {}
 if (theme !== 'light') document.documentElement.classList.add('dark');
