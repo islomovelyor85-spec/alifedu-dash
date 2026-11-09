@@ -35,6 +35,10 @@
 const SB_URL = 'https://egkwzobipdpkorbqyyjh.supabase.co';
 const SB_KEY = 'sb_publishable_CaFqJ6b9MBQf-WUbf2wepw_9VDbDjqc';
 const sbc = window.supabase.createClient(SB_URL, SB_KEY);
+// One app, two panels: reports for everyday work, /admin for setup and people.
+const ADMIN = location.pathname.startsWith('/admin') || new URLSearchParams(location.search).has('admin');
+const SWITCH_URL = ADMIN ? (location.search ? location.pathname : '/') : (location.hostname.startsWith('dash.') ? '/admin' : '?admin');
+if (ADMIN) document.title = 'Admin panel';
 let theme = null; try { theme = localStorage.getItem('audit-theme'); } catch {}
 if (theme !== 'light') document.documentElement.classList.add('dark');
 function toggleTheme() { const d = document.documentElement.classList.toggle('dark'); try { localStorage.setItem('audit-theme', d ? 'dark' : 'light'); } catch {} render(); }
@@ -73,18 +77,17 @@ function sections(id, items) {
   S.sec ||= {};
   const cur = items.find(i => i[0] === S.sec[id]) || items[0];
   const set = `S.sec['${id}']='$';render();scrollTo(0,0)`;
-  const strip = tabGroupOf(S.page) ? `<div class="mb-4 overflow-x-auto">${segBtn(items.map(i => [i[0], i[1]]), cur[0], set)}</div>`
-    : `<div class="flex gap-1 mb-5 overflow-x-auto border-b border-line">${items.map(([k, t]) => `<button onclick="${set.replace('$', k)}" class="px-3.5 h-10 whitespace-nowrap text-[13px] font-semibold border-b-2 -mb-px ${cur[0] === k ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg'}">${t}</button>`).join('')}</div>`;
+  const strip = `<div class="flex gap-1 mb-5 overflow-x-auto border-b border-line">${items.map(([k, t]) => `<button onclick="${set.replace('$', k)}" class="px-3.5 h-10 whitespace-nowrap text-[13px] font-semibold border-b-2 -mb-px ${cur[0] === k ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg'}">${t}</button>`).join('')}</div>`;
   return strip + cur[2]();
 }
-const table = (cols, rows, foot, limit) => {
+const table = (cols, rows, foot, limit, dense) => {
   const key = cols.map(c => c.t).join('|'), st = S.sort[key];
   if (st && rows.length) { const c = cols[st.i]; rows = [...rows].sort((a, b) => { const x = cellVal(c, a), y = cellVal(c, b); const v = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y)); return v * st.dir; }); }
   if (limit) rows = rows.slice(0, limit);
   let nav = '';
   if (!limit && rows.length > PAGE_SIZE) { const pg = paged(key, rows); rows = pg.items; nav = pg.nav; }
   const arrow = i => st && st.i === i ? (st.dir < 0 ? ' ↓' : ' ↑') : '';
-  return rows.length ? `<div class="overflow-x-auto -mx-4 sm:-mx-5"><table class="w-full text-sm"><thead><tr class="text-left text-xs text-muted border-b border-line">${cols.map((c, i) => `<th onclick="setSort('${esc(key).replace(/'/g, "\\'")}',${i})" title="Saralash" class="px-4 sm:px-5 py-2 font-semibold cursor-pointer select-none hover:text-fg ${c.r ? 'text-right' : ''}">${c.t}${arrow(i)}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr class="border-b border-line/60 last:border-0">${cols.map(c => `<td class="px-4 sm:px-5 py-2.5 ${c.r ? 'text-right tabular-nums' : ''}">${c.f(r)}</td>`).join('')}</tr>`).join('')}</tbody>${foot ? `<tfoot><tr class="border-t-2 border-line font-semibold bg-surface2/50">${cols.map(c => `<td class="px-4 sm:px-5 py-2.5 ${c.r ? 'text-right tabular-nums' : ''}">${c.f(foot)}</td>`).join('')}</tr></tfoot>` : ''}</table></div>${nav}` : empty("Ma'lumot yo'q");
+  return rows.length ? `<div class="overflow-x-auto -mx-4 sm:-mx-5"><table class="w-full text-sm"><thead><tr class="text-left text-xs text-muted border-b border-line">${cols.map((c, i) => `<th onclick="setSort('${esc(key).replace(/'/g, "\\'")}',${i})" title="Saralash" class="px-4 sm:px-5 py-2 font-semibold cursor-pointer select-none hover:text-fg ${c.r ? 'text-right' : ''}">${c.t}${arrow(i)}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr class="border-b border-line/60 last:border-0">${cols.map(c => `<td class="px-4 sm:px-5 ${dense ? 'py-1 text-[13px]' : 'py-2.5'} ${c.r ? 'text-right tabular-nums' : ''}">${c.f(r)}</td>`).join('')}</tr>`).join('')}</tbody>${foot ? `<tfoot><tr class="border-t-2 border-line font-semibold bg-surface2/50">${cols.map(c => `<td class="px-4 sm:px-5 py-2.5 ${c.r ? 'text-right tabular-nums' : ''}">${c.f(foot)}</td>`).join('')}</tr></tfoot>` : ''}</table></div>${nav}` : empty("Ma'lumot yo'q");
 };
 // Inline data bar (like BI dashboards): coloured bar scaled to the column max + the number.
 const bar = (v, max, color, label = num(v)) => `<div class="flex items-center gap-2 min-w-[120px]"><div class="flex-1 h-2 rounded-full bg-surface2 overflow-hidden"><div class="h-2 rounded-full" style="width:${max ? Math.max(v / max * 100, v ? 3 : 0).toFixed(1) : 0}%;background:rgb(var(--c-${color}))"></div></div><span class="text-[13px] tabular-nums font-semibold min-w-[2.5rem] text-right">${label}</span></div>`;
@@ -107,7 +110,7 @@ const groupSum = (rows, keyFn) => { const by = {}; for (const r of rows) { const
 
 const iso = d => new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
-const S = { page: 'overview', from: iso(addDays(new Date(), -29)), to: iso(new Date()), course: '', branch: '', data: {}, sort: {}, cal: null, source: '', ad: { status: 'active', level: 'ad', q: '', limit: 20 }, ai: [], aiBusy: false, menu: false, op: null, call: null, speedLimit: 300, syncing: false, warn: [] };
+const S = { page: ADMIN ? 'status' : 'overview', from: iso(addDays(new Date(), -29)), to: iso(new Date()), course: '', branch: '', data: {}, sort: {}, cal: null, source: '', ad: { status: 'active', level: 'ad', q: '', limit: 20 }, ai: [], aiBusy: false, menu: false, op: null, call: null, speedLimit: 300, syncing: false, warn: [] };
 // Quick ranges, like the Bitrix/ads date pickers.
 function quickRanges() {
   const t = new Date(), y = addDays(t, -1), m0 = new Date(t.getFullYear(), t.getMonth(), 1), m1 = new Date(t.getFullYear(), t.getMonth() + 1, 0),
@@ -159,19 +162,16 @@ function calendar() {
       </div>
     </div></div>`;
 }
-// Sidebar menu, grouped.
-// Sidebar: nine entries. Related screens live as tabs inside an entry (TABS).
-const NAV = [['', [['overview', 'Umumiy', 'ph-squares-four'], ['plan', 'Reja va fakt', 'ph-target'], ['funnel', 'Voronka', 'ph-funnel'], ['branches', 'Filiallar', 'ph-buildings'],
-  ['daily', 'Manbalar va kunlar', 'ph-calendar-dots'], ['cohort', 'Sotuv va pul', 'ph-wallet'], ['creatives', 'Marketing', 'ph-film-strip'], ['managers', 'Jamoa', 'ph-users'], ['integr', 'Sozlamalar', 'ph-gear']]]];
-const TABS = {
-  daily: [['daily', 'Kunlar va kanallar'], ['metrics', 'Kunlik metrikalar'], ['leads', 'Lead tahlili']],
-  cohort: [['cohort', "Sotuv qachon bo'ladi"], ['money', "To'lovlar va sikl"], ['economy', 'Iqtisodiyot']],
-  creatives: [['creatives', 'Kreativlar'], ['geo', 'Lokatsiya isrofi'], ['briefs', 'Brieflar']],
-  managers: [['managers', 'Menejerlar'], ['calls', "Qo'ng'iroqlar"], ['pains', "Og'riqlar va e'tirozlar"], ['speed', 'Aloqa tezligi'], ['tasks', 'Vazifalar']],
-  integr: [['integr', 'Ulanishlar'], ['mapping', 'Mapping'], ['settings', 'Sozlamalar'], ['status', 'Holat'], ['guide', "Yo'riqnoma"], ['ai', 'AI yordamchi']],
-};
-const tabGroupOf = p => Object.keys(TABS).find(k => TABS[k].some(t => t[0] === p));
-const PAGES = [...NAV.flatMap(([, items]) => items), ...Object.values(TABS).flat()].reverse();
+// Sidebar: every screen is listed directly, under a group title. Nothing is hidden behind a parent page.
+const NAV = ADMIN ? [['', [['status', 'Holat', 'ph-pulse'], ['integr', 'Ulanishlar', 'ph-plugs-connected'], ['mapping', 'Mapping', 'ph-sliders-horizontal'], ['settings', 'Sozlamalar', 'ph-gear'], ['users', 'Foydalanuvchilar', 'ph-user-gear']]]] : [
+  ['', [['overview', 'Umumiy', 'ph-squares-four'], ['plan', 'Reja va fakt', 'ph-target'], ['funnel', 'Voronka', 'ph-funnel'], ['branches', 'Filiallar', 'ph-buildings']]],
+  ['Manbalar', [['daily', 'Kunlar va kanallar', 'ph-calendar-dots'], ['metrics', 'Kunlik metrikalar', 'ph-chart-bar'], ['leads', 'Lead tahlili', 'ph-user-list']]],
+  ['Sotuv va pul', [['cohort', "Sotuv qachon bo'ladi", 'ph-hourglass-medium'], ['money', "To'lovlar va sikl", 'ph-wallet'], ['economy', 'Iqtisodiyot', 'ph-coins']]],
+  ['Marketing', [['creatives', 'Kreativlar', 'ph-film-strip'], ['geo', 'Lokatsiya isrofi', 'ph-map-pin'], ['briefs', 'Brieflar', 'ph-note-pencil']]],
+  ['Jamoa', [['managers', 'Menejerlar', 'ph-users'], ['calls', "Qo'ng'iroqlar", 'ph-phone'], ['pains', "Og'riqlar va e'tirozlar", 'ph-chat-circle-dots'], ['speed', 'Aloqa tezligi', 'ph-timer'], ['tasks', 'Vazifalar', 'ph-check-square']]],
+  ['Yordam', [['ai', 'AI yordamchi', 'ph-sparkle'], ['guide', "Yo'riqnoma", 'ph-book-open']]],
+];
+const PAGES = NAV.flatMap(([, items]) => items);
 
 // Pages through results: the API returns at most 1000 rows per request.
 // A failing view is retried once, then left empty with a warning, so one slow query never blanks the whole platform.
@@ -228,6 +228,7 @@ async function load() {
   ]);
   S.data = { funnel, courses, cohort, creatives, naming, pains, taxonomy, objections, managers, briefs, cfg, sync, outcomes, sales, users, dealStages, hours, codes, daily, operators, statusOut, cycle, money, lostReasons, cohortSum, cohortSrc, spend, adDaily, adLeads, adCatalog, wonDaily, salesMonth, calls, speed, dm, dmLive, queue, brDaily, brSpend, brCamp, plans, adGeo, economy, tasks, staff, capi, crmMap, crmStatuses };
   const srcName = Object.fromEntries(crmStatuses.filter(r => r.entity === 'SOURCE').map(r => [r.status_id, r.name]));
+  S.data.me = ADMIN ? (await q('admins'))[0] : null;
   S.data.chanMap = Object.fromEntries(crmMap.filter(r => r.kind === 'source').map(r => [srcName[r.code] || r.code, r.value]));
   S.data.hiddenUsers = new Set(crmMap.filter(r => r.kind === 'user' && r.value === 'hide').map(r => normName(users[r.code])));
 }
@@ -242,22 +243,17 @@ function goPage(k) {
   if (k === 'plan' && !S.planInit) { S.planInit = true; const t = new Date(); return setRange(iso(new Date(t.getFullYear(), t.getMonth(), 1)), iso(t)); }
   render(); scrollTo(0, 0);
 }
-function tabsBar() {
-  const g = tabGroupOf(S.page);
-  if (!g) return '';
-  return `<div class="flex gap-1 mb-5 overflow-x-auto border-b border-line -mt-1">${TABS[g].map(([k, t]) => `<button onclick="S.page='${k}';S.op=null;S.call=null;render();scrollTo(0,0)" class="px-3.5 h-10 whitespace-nowrap text-[13px] font-semibold border-b-2 -mb-px ${S.page === k ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg'}">${t}</button>`).join('')}</div>`;
-}
 function shell(body) {
   const d = S.data, title = (PAGES.find(p => p[0] === S.page) || [])[1] || '';
   const present = new Set([...(d.daily || []), ...(d.cohortSrc || []), ...(d.wonDaily || [])].map(r => channelOf(r.source)));
   const sources = ['', ...allChannels().filter(c => present.has(c))];
-  const navItem = ([k, t, i]) => `<button onclick="goPage('${k}')" class="nav-item ${S.page === k || tabGroupOf(S.page) === k ? 'active' : ''} w-full flex items-center gap-2.5 px-3 h-9 rounded-lg text-[13px] font-medium text-muted hover:text-fg hover:bg-surface2 transition"><i class="ph-bold ${i} text-base"></i>${t}</button>`;
-  const nav = NAV.map(([g, items]) => `${g ? `<div class="px-3 pt-4 pb-1.5 text-[10px] font-semibold tracking-[.14em] uppercase text-muted/70">${g}</div>` : '<div class="pt-4"></div>'}${items.map(navItem).join('')}`).join('');
+  const navItem = ([k, t, i]) => `<button onclick="goPage('${k}')" class="nav-item ${S.page === k ? 'active' : ''} w-full flex items-center gap-2.5 px-3 h-[30px] rounded-lg text-[13px] font-medium text-muted hover:text-fg hover:bg-surface2 transition"><i class="ph-bold ${i} text-base"></i>${t}</button>`;
+  const nav = NAV.map(([g, items]) => `${g ? `<div class="px-3 pt-3 pb-1 text-[10px] font-semibold tracking-[.14em] uppercase text-muted/70">${g}</div>` : '<div class="pt-3"></div>'}${items.map(navItem).join('')}`).join('');
   return `<div class="min-h-screen">
     <aside class="${S.menu ? 'flex' : 'hidden'} lg:flex fixed inset-y-0 left-0 z-30 w-60 flex-col bg-surface border-r border-line">
-      <div class="px-5 h-16 flex items-center gap-2.5 border-b border-line"><div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:rgb(var(--accent) / .18)"><i class="ph-bold ph-chart-line-up text-accent"></i></div><div><div class="font-bold text-sm leading-tight">Sotuv auditi</div><div class="text-[11px] text-muted leading-tight">Robbit akademiyasi</div></div></div>
+      <div class="px-5 h-16 flex items-center gap-2.5 border-b border-line"><div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:rgb(var(--accent) / .18)"><i class="ph-bold ${ADMIN ? 'ph-shield-check' : 'ph-chart-line-up'} text-accent"></i></div><div><div class="font-bold text-sm leading-tight">${ADMIN ? 'Admin panel' : 'Sotuv auditi'}</div><div class="text-[11px] text-muted leading-tight">Robbit akademiyasi</div></div></div>
       <nav class="flex-1 overflow-y-auto px-3 pb-4">${nav}</nav>
-      <div class="p-3 border-t border-line"><button onclick="sbc.auth.signOut().then(boot)" class="w-full flex items-center gap-2.5 px-3 h-9 rounded-lg text-[13px] text-muted hover:text-fg hover:bg-surface2"><i class="ph-bold ph-sign-out"></i>Chiqish</button></div>
+      <div class="p-3 border-t border-line"><a href="${SWITCH_URL}" class="w-full flex items-center gap-2.5 px-3 h-[30px] rounded-lg text-[13px] text-muted hover:text-fg hover:bg-surface2"><i class="ph-bold ${ADMIN ? 'ph-arrow-left' : 'ph-shield-check'}"></i>${ADMIN ? 'Hisobotlarga qaytish' : 'Admin panel'}</a><button onclick="sbc.auth.signOut().then(boot)" class="w-full flex items-center gap-2.5 px-3 h-[30px] rounded-lg text-[13px] text-muted hover:text-fg hover:bg-surface2"><i class="ph-bold ph-sign-out"></i>Chiqish</button></div>
     </aside>
     ${S.menu ? '<div class="fixed inset-0 z-20 bg-black/50 lg:hidden" onclick="S.menu=false;render()"></div>' : ''}
     <main class="lg:pl-60 min-w-0">
@@ -268,12 +264,12 @@ function shell(body) {
           <div class="ml-auto flex items-center gap-2 text-sm">
             <button onclick="syncNow()" ${S.syncing ? 'disabled' : ''} class="h-9 px-3 rounded-xl bg-surface border border-line flex items-center gap-1.5" title="Bitrix, Meta va qo'ng'iroqlarni hozir yangilash"><i class="ph-bold ph-arrows-clockwise ${S.syncing ? 'animate-spin' : ''}"></i><span class="hidden sm:inline">${S.syncing ? 'Yangilanmoqda…' : 'Yangilash'}</span></button>
             <button onclick="toggleTheme()" class="h-9 w-9 rounded-full bg-surface border border-line" aria-label="Rang rejimi" title="Yorug' / qora"><i class="ph-bold ${document.documentElement.classList.contains('dark') ? 'ph-sun' : 'ph-moon'}"></i></button>
-            ${['settings', 'integr'].includes(S.page) ? '' : calendar()}
+            ${['settings', 'integr', 'status', 'users', 'guide', 'ai'].includes(S.page) ? '' : calendar()}
             ${SOURCE_PAGES.includes(S.page) ? `<select onchange="S.source=this.value;render()" class="h-9 px-2 rounded-xl bg-surface border ${S.source ? 'border-accent text-accent' : 'border-line'}" aria-label="Kanal">${sources.map(v => `<option value="${esc(v)}" ${v === S.source ? 'selected' : ''}>${v ? esc(v) : 'Barcha kanallar'}</option>`).join('')}</select>` : ''}
           </div>
         </div>
       </header>
-      <div class="px-4 lg:px-8 py-6 max-w-[1400px]">${tabsBar()}${S.warn.length ? `<div class="mb-4 rounded-2xl border border-warn/40 bg-warn/10 text-[12.5px] p-3"><b>Ba'zi ma'lumotlar yuklanmadi</b> — «Yangilash»ni bosing. <span class="text-muted">${S.warn.map(esc).join(' · ')}</span></div>` : ''}${body}</div>
+      <div class="px-4 lg:px-8 py-6 max-w-[1400px]">${S.warn.length ? `<div class="mb-4 rounded-2xl border border-warn/40 bg-warn/10 text-[12.5px] p-3"><b>Ba'zi ma'lumotlar yuklanmadi</b> — «Yangilash»ni bosing. <span class="text-muted">${S.warn.map(esc).join(' · ')}</span></div>` : ''}${body}</div>
     </main>
   </div>`;
 }
@@ -844,16 +840,17 @@ function managerDetail() {
     ${card(h3("Qo'ng'iroqlar", "Bosing — to'liq tahlil, mezonlar va dialog") + callList(calls))}`;
 }
 
-const callList = calls => calls.length ? table([
-  { t: 'Vaqt', f: c => `<button ${go(S.op ?? normName(opNameOf(c.operator_id)), c.call_id)} class="tabular-nums hover:text-accent">${esc(String(c.call_start).slice(0, 16).replace('T', ' '))}</button>` },
-  { t: 'Menejer', f: c => esc(opNameOf(c.operator_id)) },
+const mmss = sec => sec == null ? '—' : `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}`;
+const callList = calls => calls.length ? (open => table([
+  { t: 'Vaqt', s: c => c.call_start, f: c => `<button ${open(c)} class="tabular-nums hover:text-accent">${String(c.call_start).slice(8, 10)}.${String(c.call_start).slice(5, 7)} ${String(c.call_start).slice(11, 16)}</button>` },
+  { t: 'Menejer', f: c => esc(String(opNameOf(c.operator_id)).split('|')[0].trim()) },
   { t: 'Lead', f: c => c.lead_id ? `<a href="${BX_LEAD(c.lead_id)}" target="_blank" rel="noopener" class="text-accent hover:underline">#${c.lead_id}</a>` : '—' },
-  { t: 'Turi', f: c => `${esc(c.direction)}${c.call_type && c.call_type !== 'sotuv' ? ' ' + chip(esc(c.call_type), 'neutral') : ''}` }, { t: 'Davomiylik', r: 1, f: c => num(c.duration) + ' s' },
+  { t: 'Turi', f: c => `<i class="ph-bold ${c.direction === 'kiruvchi' ? 'ph-phone-incoming text-success' : 'ph-phone-outgoing text-muted'}" title="${esc(c.direction)}"></i>${c.call_type && c.call_type !== 'sotuv' ? ' ' + chip(esc(c.call_type), 'neutral') : ''}` },
+  { t: 'Uzunlik', r: 1, s: c => +c.duration, f: c => mmss(c.duration) },
   { t: 'Natija', f: c => chip(esc(c.outcome || '—'), c.outcome === 'yozildi' ? 'success' : c.outcome === 'rad etdi' ? 'danger' : 'info') },
-  { t: 'Ball', r: 1, f: c => scoreChip(c.total) },
-  { t: 'Asosiy xato', f: c => esc((c.mistakes || [])[0] || '—') },
-  { t: '', f: c => `<button ${go(S.op ?? normName(opNameOf(c.operator_id)), c.call_id)} class="text-accent font-semibold">Ochish →</button>` },
-], calls) : empty("Bu davrda tahlil qilingan qo'ng'iroq yo'q");
+  { t: 'Ball', r: 1, s: c => c.total ?? -1, f: c => scoreChip(c.total) },
+  { t: 'Asosiy xato', f: c => { const m = (c.mistakes || [])[0] || '—'; return `<button ${open(c)} title="${esc(m)}" class="block truncate text-left max-w-[34vw] xl:max-w-[440px] hover:text-accent">${esc(m)}</button>`; } },
+], calls, null, null, true))(c => go(S.op ?? normName(opNameOf(c.operator_id)), c.call_id)) : empty("Bu davrda tahlil qilingan qo'ng'iroq yo'q");
 
 // Dialog as chat bubbles: customer left, operator right, recorded voice (IVR) centred.
 function dialog(text) {
@@ -931,8 +928,7 @@ function calls() {
     ], mgrs) : empty("Ma'lumot yo'q")))}
   </div>
 `], ['err', "Xato va e'tirozlar", () => `<div class="grid lg:grid-cols-2 gap-4 mb-6">${list('Operator xatolari', "Sotuv qo'ng'iroqlarida eng ko'p takrorlanadigan — o'quv mavzusi", top(sales, 'mistakes'), 'amber')}${list("Mijoz e'tirozlari", "Eng ko'p eshitilgan — skriptda javobi bo'lishi kerak", top(sales, 'objections'), 'rose')}</div>
-`], ['list', "Qo'ng'iroqlar", () => `${card(`<div class="flex flex-wrap items-center gap-3 mb-4">${seg([['sotuv', 'Sotuv'], ['all', 'Hammasi']], F.type, "S.callF.type='$';render()")}<label class="inline-flex items-center gap-2 text-sm"><input type="checkbox" ${F.low ? 'checked' : ''} onchange="S.callF.low=this.checked;render()"> Faqat past ball (&lt;50)</label><span class="text-xs text-muted ml-auto">${num(shown.length)} ta</span></div>` +
-    h3("Qo'ng'iroqlar", "Bosing — yozuv, xatolar va «o'rniga nima deyish kerak edi», reglament bo'yicha baho va dialog.") + callList([...shown].sort((a, b) => String(b.call_start).localeCompare(String(a.call_start)))), 'mb-6')}
+`], ['list', "Qo'ng'iroqlar", () => `${card(`<div class="flex flex-wrap items-center gap-3 mb-3">${seg([['sotuv', 'Sotuv'], ['all', 'Hammasi']], F.type, "S.callF.type='$';render()")}<label class="inline-flex items-center gap-2 text-sm"><input type="checkbox" ${F.low ? 'checked' : ''} onchange="S.callF.low=this.checked;render()"> Faqat past ball (&lt;50)</label><span class="text-xs text-muted ml-auto">Qatorni bosing — yozuv, xatolar va dialog · ${num(shown.length)} ta</span></div>` + callList([...shown].sort((a, b) => String(b.call_start).localeCompare(String(a.call_start)))), 'mb-6')}
 `], ['rule', 'Reglament', () => `<details open class="bg-surface rounded-3xl p-4 sm:p-5"><summary class="cursor-pointer font-semibold text-[15px]">Baholash reglamenti (100 ball) — qanday hisoblanadi</summary><div class="mt-4">${rubricCard().replace(/^<div class="bg-surface rounded-3xl p-4 sm:p-5 ">/, '<div>')}</div></details>`]]);
 }
 
@@ -1166,7 +1162,7 @@ const GUIDE = [
   ]],
   ['Asosiy tushunchalar', [
     ['Lead', "Bitrix'dagi har bir lead, barcha manbalar. «Target» — Meta reklamadan kelgan leadlar manbasi."],
-    ['Sifatli lead', "Sozlamalarda belgilangan «sifatli» statuslardan biriga o'tgan lead (deyarli har doim deal ochilgan)."],
+    ['Sifatli lead', "Admin paneldagi Mapping'da belgilangan «sifatli» statuslardan biriga o'tgan lead (deyarli har doim deal ochilgan)."],
     ["Bog'lanib bo'lmadi", "Lead statusi «Bog'lanib bo'lmadi» yoki «6 marta bog'lanib bo'lmadi»."],
     ['Reja va fakt', "Oy rejasidan kerakli lead, sifatli lead va byudjet hisoblanadi. Tanlangan davr rejasi = oy rejasi × kunlar / oydagi kunlar. Prognoz = shu oydagi sotuv ÷ o'tgan kunlar × oydagi kunlar."],
     ['Lokatsiya isrofi', "Har reklama xarajati × shu reklama leadlaridan «Lokatsiya to'g'ri kelmadi» ulushi. Taxminiy hisob."],
@@ -1445,19 +1441,23 @@ async function saveMonths(e) {
 const taskCard = (t, canSkip) => `<div class="rounded-2xl bg-surface2 p-4"><div class="flex flex-wrap items-start justify-between gap-2"><div class="min-w-0"><div class="text-[13.5px] font-semibold">${esc(t.title)}</div><div class="text-xs text-muted mt-0.5">${esc(t.manager || '—')}${t.branch ? ' · ' + esc(t.branch) : ''}${t.due ? ' · muddat ' + fmtDay(t.due) : ''}</div></div>${t.status === 'new' ? `<div class="flex gap-2 shrink-0"><button onclick="setTask(${t.id},'done')" class="h-8 px-3 rounded-lg bg-fg text-surface text-xs font-semibold">Bajarildi</button>${canSkip ? `<button onclick="setTask(${t.id},'skip')" class="h-8 px-3 rounded-lg bg-surface text-xs font-semibold">Kerak emas</button>` : ''}</div>` : chip(t.status === 'done' ? 'bajarilgan' : "o'tkazildi", t.status === 'done' ? 'success' : 'neutral')}</div>${t.detail ? `<p class="text-[13px] mt-2 whitespace-pre-line">${esc(t.detail)}</p>` : ''}</div>`;
 function tasksPage() {
   const d = S.data, f = S.taskF || 'new', mine = d.tasks.filter(t => f === 'all' || t.status === f), late = d.tasks.filter(t => t.status === 'new' && t.due && t.due < iso(new Date())).length;
-  const users = Object.entries(d.users).sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+  return `<div class="grid grid-cols-3 gap-3 mb-6">${kpiTile('Ochiq', num(d.tasks.filter(t => t.status === 'new').length), 'bajarilishi kerak', 'amber')}${kpiTile('Kechikkan', num(late), 'muddati o\'tgan', 'rose')}${kpiTile('Bajarilgan', num(d.tasks.filter(t => t.status === 'done').length), 'jami', 'green')}</div>` +
+    card(`<div class="mb-4">${segBtn([['new', 'Ochiq'], ['done', 'Bajarilgan'], ['all', 'Hammasi']], f, "S.taskF='$';render()")}</div>` + h3('Vazifalar', "Past baholangan sotuv qo'ng'iroqlaridan avtomatik: 50 balldan past, har menejerga bir vaqtda ko'pi bilan 5 ta ochiq vazifa.") + (mine.length ? (pg => `<div class="space-y-2.5">${pg.items.map(t => taskCard(t, true)).join('')}</div>${pg.nav}`)(paged('tasks', mine, 8)) : empty("Vazifa yo'q")));
+}
+// Admin panel: who can log in.
+function usersPage() {
+  const d = S.data, users = Object.entries(d.users).sort((a, b) => String(a[1]).localeCompare(String(b[1])));
   const staffRows = d.staff.map(s => ({ ...s, who: s.role === 'manager' ? (d.users[s.manager_id] || s.manager_id) : s.branch }));
-  return `<div class="grid grid-cols-3 gap-3 mb-6">${kpiTile('Ochiq', num(d.tasks.filter(t => t.status === 'new').length), 'bajarilishi kerak', 'amber')}${kpiTile('Kechikkan', num(late), 'muddati o\'tgan', 'rose')}${kpiTile('Bajarilgan', num(d.tasks.filter(t => t.status === 'done').length), 'jami', 'green')}</div>` + sections('tasks', [['t', 'Vazifalar', () =>
-    card(`<div class="mb-4">${segBtn([['new', 'Ochiq'], ['done', 'Bajarilgan'], ['all', 'Hammasi']], f, "S.taskF='$';render()")}</div>` + h3('Vazifalar', "Past baholangan sotuv qo'ng'iroqlaridan avtomatik: 50 balldan past, har menejerga bir vaqtda ko'pi bilan 5 ta ochiq vazifa.") + (mine.length ? (pg => `<div class="space-y-2.5">${pg.items.map(t => taskCard(t, true)).join('')}</div>${pg.nav}`)(paged('tasks', mine, 8)) : empty("Vazifa yo'q")))],
-    ['s', 'Xodimlar', () => card(h3('Xodimlar', "Xodim shu login bilan kirib, faqat o'z vazifalari va qo'ng'iroqlarini ko'radi. Filial rahbari — o'z filiali vazifalarini. Asosiy hisobotlar faqat adminlarga.") + (staffRows.length ? table([{ t: 'Ism', f: s => esc(s.name) }, { t: 'Email', f: s => esc(s.email) }, { t: 'Rol', f: s => s.role === 'manager' ? 'Menejer' : 'Filial rahbari' }, { t: 'Kim', f: s => esc(s.who || '—') }, { t: '', f: s => `<button onclick="removeStaff('${esc(s.user_id)}')" class="text-xs text-danger">O'chirish</button>` }], staffRows) : '') +
-      `<form onsubmit="addStaff(event)" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-4">
-        <input id="stName" required placeholder="Ism" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm">
-        <input id="stEmail" type="email" required placeholder="Email" autocomplete="off" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm">
-        <input id="stPass" type="password" required minlength="8" placeholder="Parol (kamida 8 belgi)" autocomplete="new-password" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm">
-        <select id="stRole" onchange="$('stMgr').hidden=this.value!=='manager';$('stBr').hidden=this.value==='manager'" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm"><option value="manager">Menejer</option><option value="branch">Filial rahbari</option></select>
-        <select id="stMgr" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm">${users.map(([id, n]) => `<option value="${esc(id)}">${esc(n)}</option>`).join('')}</select>
-        <input id="stBr" hidden placeholder="Filial nomi (masalan Xadra)" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm">
-        <button class="h-10 px-4 rounded-xl bg-fg text-surface text-sm font-semibold">Xodim qo'shish</button></form>`)]]);
+  const rows = [...(d.me ? [{ name: 'Siz', email: d.me.email, role: 'admin', who: "Barcha hisobotlar va sozlamalar" }] : []), ...staffRows], roleName = { admin: 'Admin', manager: 'Menejer', branch: 'Filial rahbari' };
+  return card(h3('Foydalanuvchilar', "Xodim o'z logini bilan kirib, faqat o'z vazifalari va qo'ng'iroqlarini ko'radi. Filial rahbari o'z filiali vazifalarini ko'radi. Hisobotlar va admin panel faqat adminlarga ochiq.") + table([{ t: 'Ism', f: s => esc(s.name) }, { t: 'Email', f: s => esc(s.email) }, { t: 'Rol', f: s => roleName[s.role] || esc(s.role) }, { t: 'Kim', f: s => esc(s.who || '—') }, { t: '', f: s => s.role === 'admin' ? '' : `<button onclick="removeStaff('${esc(s.user_id)}')" class="text-xs text-danger">O'chirish</button>` }], rows) +
+    `<form onsubmit="addStaff(event)" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-5 pt-5 border-t border-line">
+      <input id="stName" required placeholder="Ism" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm">
+      <input id="stEmail" type="email" required placeholder="Email" autocomplete="off" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm">
+      <input id="stPass" type="password" required minlength="8" placeholder="Parol (kamida 8 belgi)" autocomplete="new-password" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm">
+      <select id="stRole" onchange="$('stMgr').hidden=this.value!=='manager';$('stBr').hidden=this.value==='manager'" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm"><option value="manager">Menejer</option><option value="branch">Filial rahbari</option></select>
+      <select id="stMgr" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm">${users.map(([id, n]) => `<option value="${esc(id)}">${esc(n)}</option>`).join('')}</select>
+      <input id="stBr" hidden placeholder="Filial nomi (masalan Xadra)" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm">
+      <button class="h-10 px-4 rounded-xl bg-fg text-surface text-sm font-semibold">Xodim qo'shish</button></form>`);
 }
 async function setTask(id, status) {
   const patch = { status, done_at: status === 'new' ? null : new Date().toISOString() }, { error } = await sbc.from('tasks').update(patch).eq('id', id);
@@ -1512,7 +1512,7 @@ function integrPage() {
     ['ph-sliders-horizontal', 'green', 'Mapping', "CRM statuslari, kanallar, sotuv bosqichlari va xodimlarni hisobotga bog'lash.", !unmapped, unmapped ? `${unmapped} ta belgilanmagan` : 'Hammasi belgilangan', `${num(d.crmMap.length)} ta qoida`, 'Ochish', 'mapping'],
     ['ph-trend-up', 'rose', 'Conversions API', "Sifatli lead va sotuvni Meta'ga qaytaradi.", c.capi_enabled, c.capi_enabled ? 'Yoqilgan' : "O'chiq", `Yuborilgan: ${num(d.capi.filter(x => x.sent_at).length)}`, 'Sozlash', 'settings'],
     ['ph-telegram-logo', 'teal', 'Telegram bot', "Kunlik hisobot, 7/10/30 kun tugmalari va g'alati kunlar haqida ogohlantirish.", !!c.tg_chat_id, c.tg_chat_id ? 'Ulangan' : "Ulanmagan", 'Har soat tekshiradi', 'Holat', 'status'],
-    ['ph-sparkle', 'amber', "AI qo'ng'iroq tahlili", "Bepul Gemini: avval matnga o'giradi, keyin reglament bo'yicha baholaydi.", true, 'Ishlayapti', `24 soatda: ${num(d.queue.done24)} ta`, "Qo'ng'iroqlar", 'calls'],
+    ['ph-sparkle', 'amber', "AI qo'ng'iroq tahlili", "Bepul Gemini: avval matnga o'giradi, keyin reglament bo'yicha baholaydi.", true, 'Ishlayapti', `24 soatda: ${num(d.queue.done24)} ta`, 'Holat', 'status'],
   ];
   return `<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">${items.map(([icon, color, title, text, ok, status, sub, btn, page]) => `<div class="bg-surface rounded-3xl p-5 flex flex-col"><div class="w-11 h-11 rounded-xl flex items-center justify-center text-white text-xl mb-4" style="background:rgb(var(--c-${color}))"><i class="ph-bold ${icon}"></i></div><div class="font-semibold">${title}</div><p class="text-[13px] text-muted mt-1 mb-3 flex-1">${text}</p><div>${on(ok, status)}</div><div class="text-[11px] text-muted mt-2">${sub}</div><button onclick="S.page='${page}';render();scrollTo(0,0)" class="mt-3 text-left text-[13px] font-semibold hover:text-accent">${btn} <i class="ph-bold ph-arrow-right"></i></button></div>`).join('')}</div>`;
 }
@@ -1572,7 +1572,7 @@ async function saveMap() {
   alert(`Saqlandi. Qayta hisoblandi: ${num(data?.leads || 0)} lead, ${num(data?.deals || 0)} deal.`);
 }
 
-const VIEWS = { integr: integrPage, mapping: mappingPage, plan: planPage, geo: geoPage, economy: economyPage, tasks: tasksPage, overview, funnel, daily, leads, money: moneyPage, cohort, creatives, pains, managers, calls, speed: speedPage, metrics: metricsPage, branches: branchesPage, status: statusPage, guide: guidePage, briefs, ai, settings };
+const VIEWS = { integr: integrPage, mapping: mappingPage, plan: planPage, geo: geoPage, economy: economyPage, tasks: tasksPage, overview, funnel, daily, leads, money: moneyPage, cohort, creatives, pains, managers, calls, speed: speedPage, metrics: metricsPage, branches: branchesPage, status: statusPage, guide: guidePage, briefs, ai, settings, users: usersPage };
 function render() { $('app').innerHTML = shell(S.data.funnel ? VIEWS[S.page]() : card(empty('Yuklanmoqda…'))); }
 // Starts the Meta / Bitrix / call syncs now (sync-now waits up to ~55 s), then reloads the data.
 async function syncNow() {
