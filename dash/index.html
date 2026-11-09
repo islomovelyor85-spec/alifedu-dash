@@ -141,13 +141,13 @@ function calendar() {
 }
 // Sidebar menu, grouped.
 // Sidebar: nine entries. Related screens live as tabs inside an entry (TABS).
-const NAV = [['', [['overview', 'Umumiy', 'ph-squares-four'], ['funnel', 'Voronka', 'ph-funnel'], ['branches', 'Filiallar', 'ph-buildings'],
+const NAV = [['', [['overview', 'Umumiy', 'ph-squares-four'], ['plan', 'Reja va fakt', 'ph-target'], ['funnel', 'Voronka', 'ph-funnel'], ['branches', 'Filiallar', 'ph-buildings'],
   ['daily', 'Manbalar va kunlar', 'ph-calendar-dots'], ['cohort', 'Sotuv va pul', 'ph-wallet'], ['creatives', 'Marketing', 'ph-film-strip'], ['managers', 'Jamoa', 'ph-users'], ['settings', 'Sozlamalar', 'ph-gear']]]];
 const TABS = {
   daily: [['daily', 'Kunlar va kanallar'], ['metrics', 'Kunlik metrikalar'], ['leads', 'Lead tahlili']],
-  cohort: [['cohort', "Sotuv qachon bo'ladi"], ['money', "To'lovlar va sikl"]],
-  creatives: [['creatives', 'Kreativlar'], ['briefs', 'Brieflar']],
-  managers: [['managers', 'Menejerlar'], ['calls', "Qo'ng'iroqlar"], ['pains', "Og'riqlar va e'tirozlar"], ['speed', 'Aloqa tezligi']],
+  cohort: [['cohort', "Sotuv qachon bo'ladi"], ['money', "To'lovlar va sikl"], ['economy', 'Iqtisodiyot']],
+  creatives: [['creatives', 'Kreativlar'], ['geo', 'Lokatsiya isrofi'], ['briefs', 'Brieflar']],
+  managers: [['managers', 'Menejerlar'], ['calls', "Qo'ng'iroqlar"], ['pains', "Og'riqlar va e'tirozlar"], ['speed', 'Aloqa tezligi'], ['tasks', 'Vazifalar']],
   settings: [['settings', 'Sozlamalar'], ['status', 'Holat'], ['guide', "Yo'riqnoma"], ['ai', 'AI yordamchi']],
 };
 const tabGroupOf = p => Object.keys(TABS).find(k => TABS[k].some(t => t[0] === p));
@@ -189,7 +189,7 @@ async function load() {
   S.warn = [];
   const day = x => x.gte('day', S.from).lte('day', S.to);
   const wk = new Date(S.from + 'T00:00'); wk.setDate(wk.getDate() - (wk.getDay() + 6) % 7); const weekFrom = iso(wk);
-  const [funnel, courses, cohort, creatives, naming, pains, taxonomy, objections, managers, briefs, cfg, sync, outcomes, sales, users, dealStages, hours, codes, daily, operators, statusOut, cycle, money, lostReasons, cohortSum, cohortSrc, spend, adDaily, adLeads, adCatalog, wonDaily, salesMonth, calls, speed, dm, dmLive, queue, brDaily, brSpend, brCamp] = await Promise.all([
+  const [funnel, courses, cohort, creatives, naming, pains, taxonomy, objections, managers, briefs, cfg, sync, outcomes, sales, users, dealStages, hours, codes, daily, operators, statusOut, cycle, money, lostReasons, cohortSum, cohortSrc, spend, adDaily, adLeads, adCatalog, wonDaily, salesMonth, calls, speed, dm, dmLive, queue, brDaily, brSpend, brCamp, plans, adGeo, economy, tasks, staff, capi] = await Promise.all([
     q('v_funnel', x => x.eq('level', 'course_branch').gte('week', weekFrom).lte('week', S.to)),
     q('course_settings'), q('v_cohort'), q('v_creative_score'),
     Promise.all(['campaigns', 'adsets', 'ads'].map(t => q(t, x => x.eq('naming_error', true)).then(r => r.map(o => ({ ...o, kind: t }))))).then(a => a.flat()),
@@ -203,14 +203,22 @@ async function load() {
     q('v_speed_to_lead', day), q('daily_metrics', x => x.order('day', { ascending: false })),
     q('v_daily_metrics', x => x.gte('day', iso(addDays(new Date(), -1)))), queueStats(),
     q('v_branch_daily', day), q('v_branch_spend_daily', day), q('v_branch_campaign', day),
+    q('plan_months'), q('v_ad_geo', day), q('v_month_economy', x => x.order('month', { ascending: false })),
+    q('tasks', x => x.order('created_at', { ascending: false }).limit(1000)), q('staff'), q('capi_events'),
   ]);
-  S.data = { funnel, courses, cohort, creatives, naming, pains, taxonomy, objections, managers, briefs, cfg, sync, outcomes, sales, users, dealStages, hours, codes, daily, operators, statusOut, cycle, money, lostReasons, cohortSum, cohortSrc, spend, adDaily, adLeads, adCatalog, wonDaily, salesMonth, calls, speed, dm, dmLive, queue, brDaily, brSpend, brCamp };
+  S.data = { funnel, courses, cohort, creatives, naming, pains, taxonomy, objections, managers, briefs, cfg, sync, outcomes, sales, users, dealStages, hours, codes, daily, operators, statusOut, cycle, money, lostReasons, cohortSum, cohortSrc, spend, adDaily, adLeads, adCatalog, wonDaily, salesMonth, calls, speed, dm, dmLive, queue, brDaily, brSpend, brCamp, plans, adGeo, economy, tasks, staff, capi };
 }
 
 const opts = (vals, cur) => ['', ...vals].map(v => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${v ? esc(v) : 'Hammasi'}</option>`).join('');
 const uniq = a => [...new Set(a.filter(Boolean))].sort();
 const match = r => (!S.course || r.course === S.course) && (!S.branch || r.branch === S.branch);
 
+// The plan compares a month, so it opens on the current month the first time.
+function goPage(k) {
+  Object.assign(S, { page: k, menu: false, op: null, call: null });
+  if (k === 'plan' && !S.planInit) { S.planInit = true; const t = new Date(); return setRange(iso(new Date(t.getFullYear(), t.getMonth(), 1)), iso(t)); }
+  render(); scrollTo(0, 0);
+}
 function tabsBar() {
   const g = tabGroupOf(S.page);
   if (!g) return '';
@@ -220,7 +228,7 @@ function shell(body) {
   const d = S.data, title = (PAGES.find(p => p[0] === S.page) || [])[1] || '';
   const present = new Set([...(d.daily || []), ...(d.cohortSrc || []), ...(d.wonDaily || [])].map(r => channelOf(r.source)));
   const sources = ['', ...CHANNELS.filter(c => present.has(c))];
-  const navItem = ([k, t, i]) => `<button onclick="S.page='${k}';S.menu=false;S.op=null;S.call=null;render();scrollTo(0,0)" class="nav-item ${S.page === k || tabGroupOf(S.page) === k ? 'active' : ''} w-full flex items-center gap-2.5 px-3 h-9 rounded-lg text-[13px] font-medium text-muted hover:text-fg hover:bg-surface2 transition"><i class="ph-bold ${i} text-base"></i>${t}</button>`;
+  const navItem = ([k, t, i]) => `<button onclick="goPage('${k}')" class="nav-item ${S.page === k || tabGroupOf(S.page) === k ? 'active' : ''} w-full flex items-center gap-2.5 px-3 h-9 rounded-lg text-[13px] font-medium text-muted hover:text-fg hover:bg-surface2 transition"><i class="ph-bold ${i} text-base"></i>${t}</button>`;
   const nav = NAV.map(([g, items]) => `${g ? `<div class="px-3 pt-4 pb-1.5 text-[10px] font-semibold tracking-[.14em] uppercase text-muted/70">${g}</div>` : '<div class="pt-4"></div>'}${items.map(navItem).join('')}`).join('');
   return `<div class="min-h-screen">
     <aside class="${S.menu ? 'flex' : 'hidden'} lg:flex fixed inset-y-0 left-0 z-30 w-60 flex-col bg-surface border-r border-line">
@@ -771,7 +779,7 @@ const avgOf = (rows, f) => { const xs = rows.map(f).filter(v => v != null && isF
 const go = (op, call) => `onclick="S.op=${op == null ? 'null' : `'${esc(String(op)).replace(/'/g, "\\'")}'`};S.call=${call == null ? 'null' : `'${esc(call)}'`};render();scrollTo(0,0)"`;
 const crumbs = (...parts) => `<div class="flex flex-wrap items-center gap-1.5 text-[13px] text-muted mb-4">${parts.map(([t, on]) => on ? `<button ${on} class="hover:text-fg underline-offset-2 hover:underline">${t}</button>` : `<span class="text-fg font-semibold">${t}</span>`).join('<i class="ph-bold ph-caret-right text-[10px]"></i>')}</div>`;
 const kpiTile = (l, v, sub, color) => `<div class="bg-surface rounded-3xl p-5"><div class="text-[11px] font-semibold tracking-wide uppercase" style="color:rgb(var(--c-${color}))">${l}</div><div class="text-[28px] leading-tight font-bold mt-1 tabular-nums">${v}</div>${sub ? `<div class="text-[11px] text-muted mt-1">${sub}</div>` : ''}</div>`;
-const analysed = () => (S.data.calls || []).filter(r => r.transcript);
+const analysed = () => (S.data.calls || []).filter(r => r.transcript && r.rubric);
 const isSale = c => !c.call_type || c.call_type === 'sotuv';
 
 // One row per manager for the selected dates: CRM outcomes + call scores.
@@ -961,6 +969,7 @@ function settings() {
         <label><span class="text-[11px] text-muted">Ulush</span><input name="ad_share" value="${k.ad_share}" class="w-full h-9 px-2 rounded-lg bg-surface2 border border-line"></label>
         <label><span class="text-[11px] text-muted">Q→S${k.qual_to_sale_manual ? '' : ' (avto)'}</span><input name="qual_to_sale" value="${(+k.qual_to_sale).toFixed(3)}" class="w-full h-9 px-2 rounded-lg bg-surface2 border border-line"></label>
       </div>`).join('')}<button onclick="saveCourses()" class="h-10 px-4 rounded-xl bg-fg text-surface text-sm font-semibold">Kurslarni saqlash</button></div>` : empty("Kurslar birinchi sinxronizatsiyadan keyin paydo bo'ladi")))}
+    ${card(h3('Conversions API (Meta)', "Sifatli lead va sotuvni Meta'ga qaytaradi. Faqat Target leadlar, telefon xeshlangan holda yuboriladi va saqlanmaydi.") + `<form onsubmit="saveCapi(event)" class="space-y-3"><label class="block"><span class="block text-xs font-semibold mb-1.5">Dataset (Pixel) ID</span><input id="cfDs" value="${esc(c.capi_dataset || '')}" class="w-full h-10 px-3 rounded-xl bg-surface2 border border-line text-sm"></label><label class="flex items-center gap-2 text-sm"><input id="cfCapi" type="checkbox" ${c.capi_enabled ? 'checked' : ''}> Yuborishni yoqish</label><button class="h-10 px-4 rounded-xl bg-fg text-surface text-sm font-semibold">Saqlash</button></form><p class="text-[11px] text-muted mt-2">Yuborildi: ${num((S.data.capi || []).filter(x => x.sent_at).length)} · xato: ${num((S.data.capi || []).filter(x => x.error).length)}</p>`)}
     ${card(h3('Sinxronizatsiya') + (S.data.sync.length ? table([{ t: 'Manba', f: s => esc(s.source) }, { t: 'Holat', f: st }, { t: 'Oxirgi', f: s => s.last_run_at ? new Date(s.last_run_at).toLocaleString('uz') : '—' }], S.data.sync) + S.data.sync.filter(s => s.last_error).map(s => `<p class="text-xs text-danger mt-2 break-all">${esc(s.source)}: ${esc(s.last_error)}</p>`).join('') : empty("Hali ishga tushmagan — Edge Function secret'larini qo'ying")))}
     </div></div>`;
 }
@@ -982,6 +991,14 @@ async function saveFx(e, auto) {
   if (error) return alert(error.message);
   Object.assign(S.data.cfg, patch); render();
   alert(auto ? "Keyingi sinxronizatsiyada Markaziy bank kursi olinadi." : "Saqlandi: so'mdagi barcha hisoblar shu kursda.");
+}
+async function saveCapi(e) {
+  e.preventDefault();
+  const patch = { capi_dataset: $('cfDs').value.trim() || null, capi_enabled: $('cfCapi').checked };
+  if (patch.capi_enabled && !patch.capi_dataset) return alert('Dataset ID kiriting');
+  const { error } = await sbc.from('audit_settings').update(patch).eq('id', 1);
+  if (error) return alert(error.message);
+  Object.assign(S.data.cfg, patch); render();
 }
 async function saveCourses() {
   for (const row of document.querySelectorAll('[data-course]')) {
@@ -1266,7 +1283,202 @@ function statusPage() {
   ${card(h3('Eslatmalar', y ? `Kecha (${fmtDay(y.day)}) oldingi 7 kunlik o'rtacha bilan solishtirildi` : '') + (alerts.length ? alerts.map(a => `<div class="rounded-2xl border ${tone[a.level]} p-4 mb-3 last:mb-0"><div class="font-semibold text-[13.5px]">${a.level === 'danger' ? '🔴' : '🟠'} ${a.title}</div>${a.msg ? `<div class="text-[13px] mt-1">${a.msg}</div>` : ''}${a.action ? `<div class="text-[13px] mt-1 text-accent"><i class="ph-bold ph-arrow-right"></i> ${a.action}</div>` : ''}</div>`).join('') : `<div class="text-[13px] py-4">✅ Hammasi me'yorida: kechagi ko'rsatkichlar 7 kunlik o'rtachadan sezilarli yomonlashmagan.</div>`))}`;
 }
 
-const VIEWS = { overview, funnel, daily, leads, money: moneyPage, cohort, creatives, pains, managers, calls, speed: speedPage, metrics: metricsPage, branches: branchesPage, status: statusPage, guide: guidePage, briefs, ai, settings };
+// ---------- Plan vs fact ----------
+const pctInput = (id, l, v, suffix = '%', step = '0.1') => `<label class="block"><span class="block text-xs font-semibold mb-1.5">${l}</span><div class="relative"><input id="${id}" type="number" min="0" step="${step}" value="${v}" class="w-full h-10 pl-3 pr-8 rounded-xl bg-surface2 border border-line text-sm"><span class="absolute right-3 top-2.5 text-xs text-muted">${suffix}</span></div></label>`;
+const fmtP = v => +(v * 100).toFixed(1);
+function planNeed(p) {
+  const came = div(p.sales, +p.came_sale) || 0, qual = div(came, +p.qual_came) || 0, leads = div(qual, +p.lead_qual) || 0;
+  const tShare = +(p.channels?.Target ?? 100) / 100, tLeads = leads * tShare;
+  return { sales: +p.sales, came, qual, leads, tLeads, budget: tLeads * +p.cpl, cplan: tLeads ? +p.cpl : null };
+}
+// Ads worth acting on in the selected period, from Meta spend and Bitrix quality.
+function adStats() {
+  const d = S.data, by = {}, cat = Object.fromEntries(d.adCatalog.map(a => [a.id, a]));
+  const get = id => by[id] ??= { id, name: cat[id]?.name || id, active: cat[id]?.status === 'ACTIVE', spend: 0, leads: 0, qual: 0, wrong: 0, geoLeads: 0 };
+  for (const r of d.adDaily) get(r.ad_id).spend += +r.spend;
+  for (const r of d.adLeads) { const o = get(r.ad_id); o.leads += +r.leads; o.qual += +r.qual; }
+  for (const r of d.adGeo) { const o = get(r.ad_id); o.geoLeads += +r.leads; o.wrong += +r.wrong_loc; }
+  return Object.values(by);
+}
+function planCauses(p, t, sold, need, scale) {
+  const out = [], push = (tone, title, msg, action) => out.push({ tone, title, msg, action });
+  const stages = [['Lead → sifatli', div(t.qual, t.leads), +p.lead_qual, "Auditoriya va lead formani tekshiring: quyidagi kreativlar va hudud isrofi."],
+    ['Sifatli → filialga keldi', div(t.came_to_branch, t.qual), +p.qual_came, "Sifatli leadlarni demo darsga yozishni kuchaytiring: Jamoa → Qo'ng'iroqlar sahifasida «Sokrat» bosqichini tekshiring."],
+    ['Filialga keldi → sotuv', div(t.won, t.came_to_branch), +p.came_sale, "Filiallardagi yopish suhbatini tekshiring. Yangi leadlar hali sotuvga ulgurmagan bo'lishi mumkin."]]
+    .filter(x => x[1] != null && x[2]).map(x => [...x, x[1] / x[2]]);
+  if (stages.length) { const w = [...stages].sort((a, b) => a[4] - b[4])[0];
+    if (w[4] < 0.9) push('danger', `Eng tor joy: ${w[0]}`, `Fakt ${pct(w[1])}, reja ${pct(w[2])}: rejaning ${Math.round(w[4] * 100)}% i.`, w[3]); }
+  const planLeads = need.leads * scale;
+  if (planLeads && t.leads < planLeads * 0.9) push('warn', "Lead yetishmayapti", `${num(t.leads)} ta keldi, shu davr rejasi ${num(planLeads)} ta (${pct(div(t.leads, planLeads))}).`, "Byudjetni rejadagi darajaga oling yoki rejani kamaytiring.");
+  const ads = adStats().filter(o => o.spend > 0);
+  const zero = ads.filter(o => o.active && !o.qual && o.spend >= 15).sort((a, b) => b.spend - a.spend).slice(0, 3);
+  if (zero.length) push('danger', "Pul yeyotgan, sifatli lead bermayotgan kreativlar", zero.map(o => `${esc(o.name)} — ${adMoney(o.spend, false)}, ${num(o.leads)} lead`).join('<br>'), "Bularni to'xtating yoki kreativini almashtiring.");
+  const best = ads.filter(o => o.qual >= 2).sort((a, b) => a.spend / a.qual - b.spend / b.qual).slice(0, 3);
+  if (best.length) push('success', 'Eng arzon sifatli lead berayotganlar', best.map(o => `${esc(o.name)} — ${adMoney(o.spend / o.qual, false)} / sifatli`).join('<br>'), "Byudjetni shularga ko'chiring.");
+  const geoL = ads.reduce((a, o) => a + o.geoLeads, 0), geoW = ads.reduce((a, o) => a + o.wrong, 0), waste = ads.reduce((a, o) => a + (o.geoLeads ? o.spend * o.wrong / o.geoLeads : 0), 0);
+  if (geoL >= 30 && geoW / geoL >= 0.1) push('warn', 'Boshqa viloyatdan leadlar', `${num(geoW)} ta lead (${pct(geoW / geoL)}) «Lokatsiya to'g'ri kelmadi»: taxminan ${adMoney(waste, false)} isrof.`, "Marketing → Lokatsiya isrofi sahifasida qaysi reklama ekanini ko'ring, geotargetni toraytiring.");
+  const ch = groupSum(S.data.daily, r => channelOf(r.source)).filter(o => o.leads >= 30 && !o.qual);
+  for (const o of ch) push('warn', `«${esc(o.key)}»: ${num(o.leads)} lead, sifatli 0`, 'Bu kanal umumiy konversiyani tushiryapti.', "Bu leadlar haqiqiy mijozmi, tekshiring; agar sinov bo'lsa, rejadan chiqaring.");
+  if (t.in_progress >= 20) push('warn', `${num(t.in_progress)} ta lead hali hal bo'lmagan`, "Qo'ng'iroq qilinmagan yoki qayta aloqa kutayotgan leadlar.", "Menejerlar bugun shulardan boshlasin.");
+  const ops = groupSum(S.data.operators, r => r.operator).filter(o => o.leads >= 20).map(o => ({ ...o, r: div(o.qual, o.leads) })).sort((a, b) => a.r - b.r);
+  if (ops.length > 1 && ops[ops.length - 1].r > ops[0].r * 1.5) push('warn', 'Operatorlar orasida katta farq', `Eng past: ${esc(ops[0].key)} ${pct(ops[0].r)}, eng yuqori: ${esc(ops[ops.length - 1].key)} ${pct(ops[ops.length - 1].r)}.`, "Eng past operatorning qo'ng'iroqlarini ko'rib chiqing (Jamoa → Vazifalar).");
+  return out;
+}
+function planPage() {
+  const d = S.data, month = S.from.slice(0, 7), key = month + '-01', saved = d.plans.find(x => x.month === key);
+  const p = saved || { month: key, sales: 0, lead_qual: 0.2, qual_came: 0.3, came_sale: 0.8, cpl: 3, channels: {}, branches: {} };
+  const need = planNeed(p), y = +month.slice(0, 4), m = +month.slice(5, 7), dim = new Date(y, m, 0).getDate();
+  const days = Math.round((new Date(S.to) - new Date(S.from)) / 864e5) + 1, scale = Math.min(days / dim, 1);
+  const [t = { leads: 0, qual: 0, came_to_branch: 0, won: 0, in_progress: 0 }] = groupSum(d.daily, () => 'all');
+  const sold = d.wonDaily.reduce((a, r) => a + +r.won, 0), spend = d.spend.reduce((a, r) => a + +r.spend, 0);
+  const today = iso(new Date()), isCurrent = today.slice(0, 7) === month && S.from === key && S.to >= today;
+  const elapsed = isCurrent ? +today.slice(8) : null, left = isCurrent ? dim - elapsed : null, forecast = isCurrent ? Math.round(sold / elapsed * dim) : null;
+  const tile = (l, fact, plan, f = num) => { const r = div(fact, plan); return `<div class="bg-surface rounded-3xl p-5"><div class="flex justify-between items-baseline"><span class="text-xs text-muted">${l}</span>${plan ? `<span class="text-xs font-semibold tabular-nums">${pct(r)}</span>` : ''}</div><div class="text-[26px] font-bold tabular-nums mt-1">${f(fact)}</div><div class="text-[11px] text-muted">reja ${plan ? f(plan) : '—'}</div><div class="mt-2 h-1.5 rounded-full bg-surface2 overflow-hidden"><div class="h-full rounded-full" style="width:${Math.min((r || 0) * 100, 100).toFixed(1)}%;background:rgb(var(--c-${r >= 0.9 ? 'green' : r >= 0.7 ? 'amber' : 'rose'}))"></div></div></div>`; };
+  const fc = !p.sales ? '' : isCurrent ? `<div class="rounded-2xl bg-surface2 p-4 text-[14px] mb-6"><b>Prognoz:</b> shu tezlikda oy <b>${num(forecast)} ta sotuv</b> bilan tugaydi (reja ${num(p.sales)}, ${pct(div(forecast, p.sales))}).${forecast < p.sales && left ? ` Rejaga yetish uchun qolgan ${left} kunda kuniga <b>${num(Math.ceil((p.sales - sold) / left))} ta</b> sotuv kerak (hozir kuniga ${(sold / elapsed).toFixed(1)}).` : ''}</div>` : `<p class="text-xs text-muted mb-6">Prognoz faqat joriy oy boshidan bugungacha tanlanganda ko'rinadi.</p>`;
+  const causes = p.sales ? planCauses(p, t, sold, need, scale) : [];
+  const tone = { danger: 'border-danger/40 bg-danger/10', warn: 'border-warn/40 bg-warn/10', success: 'border-success/40 bg-success/10' };
+  const causeHtml = card(h3('Nega orqadamiz va nima qilish kerak', 'Tanlangan davr raqamlaridan avtomatik') + (causes.length ? `<div class="grid lg:grid-cols-2 gap-3">${causes.map(c => `<div class="rounded-2xl border ${tone[c.tone]} p-4"><div class="font-semibold text-[13.5px]">${c.title}</div><div class="text-[13px] mt-1">${c.msg}</div>${c.action ? `<div class="text-[13px] mt-1.5 font-medium"><i class="ph-bold ph-arrow-right"></i> ${c.action}</div>` : ''}</div>`).join('')}</div>` : empty(p.sales ? "Katta og'ish topilmadi" : "Avval rejani kiriting")), 'mb-6');
+  // Channels
+  const won = {}; for (const r of d.wonDaily) won[channelOf(r.source)] = (won[channelOf(r.source)] || 0) + +r.won;
+  const facts = Object.fromEntries(groupSum(d.daily, r => channelOf(r.source)).map(o => [o.key, o]));
+  const names = CHANNELS.filter(c => facts[c] || won[c] || p.channels?.[c] != null);
+  const cell = (fact, plan) => { const r = div(fact, plan); return `<span class="font-semibold tabular-nums" style="${plan ? `color:rgb(var(--c-${r >= 0.9 ? 'green' : r >= 0.7 ? 'amber' : 'rose'}))` : ''}">${num(fact)}</span> <span class="text-xs text-muted tabular-nums">/ ${plan ? num(plan) : '—'}</span>`; };
+  const share = c => (+(p.channels?.[c] ?? 0)) / 100;
+  const chanRows = names.map(c => ({ c, leads: facts[c]?.leads || 0, qual: facts[c]?.qual || 0, sold: won[c] || 0, s: share(c) }));
+  const chanTable = table([{ t: 'Kanal', f: o => `<span class="font-semibold">${esc(o.c)}</span>`, s: o => o.c },
+    { t: 'Ulush', r: 1, f: o => `<input data-ch="${esc(o.c)}" type="number" min="0" max="100" value="${+(p.channels?.[o.c] ?? 0)}" class="w-16 h-8 px-2 rounded-lg bg-surface2 border border-line text-right">%`, s: o => o.s },
+    { t: 'Lead', r: 1, f: o => cell(o.leads, need.leads * o.s * scale), s: o => o.leads }, { t: 'Sifatli', r: 1, f: o => cell(o.qual, need.qual * o.s * scale), s: o => o.qual }, { t: 'Sotuv', r: 1, f: o => cell(o.sold, need.sales * o.s * scale), s: o => o.sold }], chanRows);
+  // Branches
+  const br = {}; for (const r of d.brDaily) { const o = br[r.branch] ??= { b: r.branch, leads: 0, qual: 0, sold: 0 }; o.leads += +r.leads; o.qual += +r.qual; o.sold += +r.won; }
+  const brList = Object.values(br).filter(o => o.b && !/^(Aniqlanmagan|Boshqa)/i.test(o.b)).sort((a, b) => b.leads - a.leads);
+  const brShare = b => (+(p.branches?.[b] ?? 0)) / 100, brSum = brList.reduce((a, o) => a + +(p.branches?.[o.b] ?? 0), 0);
+  const brTable = table([{ t: 'Filial', f: o => `<span class="font-semibold">${esc(o.b)}</span>`, s: o => o.b },
+    { t: 'Ulush', r: 1, f: o => `<input data-br="${esc(o.b)}" type="number" min="0" max="100" value="${+(p.branches?.[o.b] ?? 0)}" class="w-16 h-8 px-2 rounded-lg bg-surface2 border border-line text-right">%`, s: o => brShare(o.b) },
+    { t: 'Lead', r: 1, f: o => cell(o.leads, need.leads * brShare(o.b) * scale), s: o => o.leads }, { t: 'Sifatli', r: 1, f: o => cell(o.qual, need.qual * brShare(o.b) * scale), s: o => o.qual }, { t: 'Sotuv', r: 1, f: o => cell(o.sold, need.sales * brShare(o.b) * scale), s: o => o.sold }], brList);
+  const chSum = names.reduce((a, c) => a + +(p.channels?.[c] ?? 0), 0);
+  return `<div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">${tile('Lead', t.leads, need.leads * scale)}${tile('Sifatli lead', t.qual, need.qual * scale)}${tile('Filialga keldi', t.came_to_branch, need.came * scale)}${tile('Sotuv', sold, need.sales * scale)}${tile('Reklama xarajati', spend, need.budget * scale, v => adMoney(v, false))}</div>
+    <p class="text-[11px] text-muted mb-4">Reja tanlangan ${days} kunga bo'lingan (oy rejasi × ${days}/${dim}). Sotuv — shu davrda yopilgan sotuvlar.</p>
+    ${fc}${causeHtml}
+    <form onsubmit="savePlan(event)">
+    ${card(h3(`${MONTH_FULL[m - 1]} ${y} rejasi`, saved ? "O'zgartirib «Saqlash»ni bosing." : "Bu oy uchun reja hali kiritilmagan.") + `<div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
+      ${pctInput('plSales', 'Sotuv rejasi', p.sales, 'ta', '1')}${pctInput('plLQ', 'Lead → sifatli', fmtP(p.lead_qual))}${pctInput('plQC', 'Sifatli → filialga keldi', fmtP(p.qual_came))}${pctInput('plCS', 'Filialga keldi → sotuv', fmtP(p.came_sale))}${pctInput('plCpl', 'Target lead narxi', p.cpl, '$', '0.01')}</div>
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm"><div class="rounded-xl bg-surface2 p-3"><div class="text-xs text-muted">Kerakli lead</div><b class="tabular-nums">${num(need.leads)}</b> <span class="text-xs text-muted">kuniga ${num(need.leads / dim)}</span></div><div class="rounded-xl bg-surface2 p-3"><div class="text-xs text-muted">Kerakli sifatli</div><b class="tabular-nums">${num(need.qual)}</b></div><div class="rounded-xl bg-surface2 p-3"><div class="text-xs text-muted">Filialga kelishi kerak</div><b class="tabular-nums">${num(need.came)}</b></div><div class="rounded-xl bg-surface2 p-3"><div class="text-xs text-muted">Reklama byudjeti</div><b class="tabular-nums">${adMoney(need.budget, false)}</b> <span class="text-xs text-muted">${num(need.tLeads)} Target lead</span></div></div>`, 'mb-6')}
+    ${card(h3('Kanallar', `Ulushlar jami ${chSum}%${chSum === 100 ? '' : ' — 100% bo\'lishi kerak'}. Lead/sifatli/sotuv: fakt / shu davr rejasi.`) + chanTable, 'mb-6')}
+    ${card(h3('Filiallar', `Ulushlar jami ${brSum}%${brSum === 100 ? '' : ' — 100% bo\'lishi kerak'}. Filial bo'yicha rejani shu yerda bering.`) + brTable, 'mb-6')}
+    <button class="h-11 px-6 rounded-xl bg-fg text-surface text-sm font-semibold">Rejani saqlash</button></form>`;
+}
+async function savePlan(e) {
+  e.preventDefault();
+  const pick = attr => Object.fromEntries([...document.querySelectorAll(`input[${attr}]`)].map(i => [i.getAttribute(attr), +i.value || 0]).filter(x => x[1] > 0));
+  const row = { month: S.from.slice(0, 7) + '-01', sales: +$('plSales').value || 0, lead_qual: (+$('plLQ').value || 0) / 100, qual_came: (+$('plQC').value || 0) / 100, came_sale: (+$('plCS').value || 0) / 100, cpl: +$('plCpl').value || 0, channels: pick('data-ch'), branches: pick('data-br'), updated_at: new Date().toISOString() };
+  const { error } = await sbc.from('plan_months').upsert(row);
+  if (error) return alert(error.message);
+  S.data.plans = [...S.data.plans.filter(x => x.month !== row.month), row]; render();
+}
+
+// ---------- Money lost on leads from the wrong region ----------
+function geoPage() {
+  const d = S.data, level = S.geoLevel || 'campaign', cat = Object.fromEntries(d.adCatalog.map(a => [a.id, a]));
+  const keyOf = id => level === 'ad' ? (cat[id]?.name || id) : level === 'adset' ? (cat[id]?.adset || '—') : (cat[id]?.campaign || '—');
+  const by = {}; for (const o of adStats()) { const r = by[keyOf(o.id)] ??= { key: keyOf(o.id), spend: 0, leads: 0, wrong: 0, waste: 0, active: false, thumb: level === 'ad' ? cat[o.id]?.thumb : null }; r.spend += o.spend; r.leads += o.geoLeads; r.wrong += o.wrong; r.active ||= o.active; if (o.geoLeads) r.waste += o.spend * o.wrong / o.geoLeads; }
+  const rows = Object.values(by).filter(r => r.leads).sort((a, b) => b.waste - a.waste);
+  if (!rows.length) return card(empty("Tanlangan davrda reklama leadlari yo'q"));
+  const T = rows.reduce((t, r) => { for (const k of ['spend', 'leads', 'wrong', 'waste']) t[k] += r[k]; return t; }, { _foot: true, key: 'Jami', spend: 0, leads: 0, wrong: 0, waste: 0 });
+  const share = r => div(r.wrong, r.leads), avg = share(T), worst = rows.filter(r => r.leads >= 20 && share(r) > avg).sort((a, b) => share(b) - share(a))[0];
+  const k = (l, v, sub, c) => kpiTile(l, v, sub, c);
+  return `<div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">${k('Isrof', adMoney(T.waste, false), `reklama xarajatining ${pct(div(T.waste, T.spend))} i`, 'rose')}${k('Boshqa viloyat leadlari', num(T.wrong), `${pct(avg)} reklama leadlaridan`, 'amber')}${k('Reklama leadlari', num(T.leads), adMoney(T.spend, false) + ' xarajat', 'blue')}</div>` +
+    (worst ? `<div class="rounded-2xl border border-warn/40 bg-warn/10 p-4 text-[13.5px] mb-6"><b>Birinchi tuzatish:</b> «${esc(worst.key)}» — leadlarning ${pct(share(worst))} i boshqa viloyatdan (o'rtacha ${pct(avg)}). Geotargetni filial atrofiga toraytiring va lead formada viloyat savolini birinchi qo'ying.</div>` : '') +
+    card(`<div class="mb-4">${segBtn([['campaign', 'Kampaniyalar'], ['adset', 'Adsetlar'], ['ad', "E'lonlar"]], level, "S.geoLevel='$';render()")}</div>` + h3('Noto\'g\'ri hududga ketgan pul', "Isrof = xarajat × («Lokatsiya to'g'ri kelmadi» leadlar ulushi). Bu taxminiy hisob: lead narxi reklama ichida bir xil deb olingan.") + table([
+      { t: 'Reklama', f: r => r._foot ? 'Jami' : `<span class="font-semibold">${esc(r.key)}</span>${r.active ? ' ' + chip('faol', 'success') : ''}`, s: r => r.key },
+      { t: 'Xarajat', r: 1, s: r => r.spend, f: r => adMoney(r.spend, false) }, { t: 'Leadlar', r: 1, s: r => r.leads, f: r => num(r.leads) },
+      { t: 'Boshqa viloyat', r: 1, s: r => r.wrong, f: r => num(r.wrong) },
+      { t: 'Ulushi', r: 1, s: r => share(r) ?? -1, f: r => r._foot || r.leads < 10 ? pct(share(r)) : chip(pct(share(r)), share(r) > avg ? 'danger' : 'success') },
+      { t: 'Isrof', r: 1, s: r => r.waste, f: r => adMoney(r.waste, false) }], rows, T));
+}
+
+// ---------- Unit economics by month ----------
+function economyPage() {
+  const d = S.data, fx = +d.cfg?.fx_rate || 0, months = +d.cfg?.avg_months || 0;
+  const rows = d.economy.filter(r => r.month >= '2026-07-01' && (+r.spend || +r.sales)).map(r => { const sales = +r.sales, spend = +r.spend, amount = +r.amount, check = div(amount, sales), cac = div(spend, sales), cacUzs = cac == null ? null : cac * fx, ltv = check != null && months ? check * months : null;
+    return { ...r, sales, spend, amount, check, cac, cacUzs, tCac: div(spend, +r.target_sales), roi1: div(check, cacUzs), ltv, ltvCac: div(ltv, cacUzs) }; });
+  if (!rows.length) return card(empty("Ma'lumot yo'q"));
+  const name = m => `${MONTH_FULL[+m.slice(5, 7) - 1]} ${m.slice(0, 4)}`, x = v => v == null ? '—' : v.toFixed(1) + '×';
+  return card(`<form onsubmit="saveMonths(event)" class="flex flex-wrap items-end gap-3"><label class="block"><span class="block text-xs font-semibold mb-1.5">O'quvchi o'rtacha necha oy o'qiydi</span><input id="cfMonths" type="number" min="0" step="0.1" value="${months || ''}" class="w-40 h-10 px-3 rounded-xl bg-surface2 border border-line text-sm"></label><button class="h-10 px-4 rounded-xl bg-fg text-surface text-sm font-semibold">Saqlash</button><p class="text-xs text-muted max-w-xl">Bitrix'da to'lovlar yuritilmayapti («Всего оплачено» bo'sh), shuning uchun LTV = o'rtacha deal summasi × shu oylar. Bu sizning taxminingizga bog'liq.</p></form>`, 'mb-6') +
+    card(h3("Oylar bo'yicha iqtisodiyot", "Sotuv — shu oyda yopilgan barcha sotuvlar. CAC — reklama xarajati ÷ sotuv. Target CAC — xarajat ÷ faqat Target sotuvlar: reklamaning haqiqiy narxi.") + table([
+      { t: 'Oy', f: r => `<b>${name(r.month)}</b>`, s: r => r.month }, { t: 'Sotuv', r: 1, s: r => r.sales, f: r => num(r.sales) },
+      { t: "O'rtacha chek", r: 1, s: r => r.check ?? 0, f: r => moneyShort(r.check) + " so'm" }, { t: 'Xarajat', r: 1, s: r => r.spend, f: r => adMoney(r.spend, false) },
+      { t: 'CAC', r: 1, s: r => r.cac ?? 0, f: r => adMoney(r.cac, false) }, { t: 'Target CAC', r: 1, s: r => r.tCac ?? 0, f: r => adMoney(r.tCac, false) },
+      { t: 'Chek / CAC', r: 1, s: r => r.roi1 ?? 0, f: r => x(r.roi1) }, { t: 'LTV', r: 1, s: r => r.ltv ?? 0, f: r => r.ltv == null ? '—' : moneyShort(r.ltv) + " so'm" },
+      { t: 'LTV / CAC', r: 1, s: r => r.ltvCac ?? 0, f: r => r.ltvCac == null ? '—' : chip(x(r.ltvCac), r.ltvCac >= 3 ? 'success' : 'danger') }], rows));
+}
+async function saveMonths(e) {
+  e.preventDefault();
+  const v = +$('cfMonths').value || null, { error } = await sbc.from('audit_settings').update({ avg_months: v }).eq('id', 1);
+  if (error) return alert(error.message);
+  S.data.cfg.avg_months = v; render();
+}
+
+// ---------- Tasks from weak calls, and staff logins ----------
+const taskCard = (t, canSkip) => `<div class="rounded-2xl bg-surface2 p-4"><div class="flex flex-wrap items-start justify-between gap-2"><div class="min-w-0"><div class="text-[13.5px] font-semibold">${esc(t.title)}</div><div class="text-xs text-muted mt-0.5">${esc(t.manager || '—')}${t.branch ? ' · ' + esc(t.branch) : ''}${t.due ? ' · muddat ' + fmtDay(t.due) : ''}</div></div>${t.status === 'new' ? `<div class="flex gap-2 shrink-0"><button onclick="setTask(${t.id},'done')" class="h-8 px-3 rounded-lg bg-fg text-surface text-xs font-semibold">Bajarildi</button>${canSkip ? `<button onclick="setTask(${t.id},'skip')" class="h-8 px-3 rounded-lg bg-surface text-xs font-semibold">Kerak emas</button>` : ''}</div>` : chip(t.status === 'done' ? 'bajarilgan' : "o'tkazildi", t.status === 'done' ? 'success' : 'neutral')}</div>${t.detail ? `<p class="text-[13px] mt-2 whitespace-pre-line">${esc(t.detail)}</p>` : ''}</div>`;
+function tasksPage() {
+  const d = S.data, f = S.taskF || 'new', mine = d.tasks.filter(t => f === 'all' || t.status === f), late = d.tasks.filter(t => t.status === 'new' && t.due && t.due < iso(new Date())).length;
+  const users = Object.entries(d.users).sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+  const staffRows = d.staff.map(s => ({ ...s, who: s.role === 'manager' ? (d.users[s.manager_id] || s.manager_id) : s.branch }));
+  return `<div class="grid grid-cols-3 gap-3 mb-6">${kpiTile('Ochiq', num(d.tasks.filter(t => t.status === 'new').length), 'bajarilishi kerak', 'amber')}${kpiTile('Kechikkan', num(late), 'muddati o\'tgan', 'rose')}${kpiTile('Bajarilgan', num(d.tasks.filter(t => t.status === 'done').length), 'jami', 'green')}</div>` +
+    card(`<div class="mb-4">${segBtn([['new', 'Ochiq'], ['done', 'Bajarilgan'], ['all', 'Hammasi']], f, "S.taskF='$';render()")}</div>` + h3('Vazifalar', "Past baholangan sotuv qo'ng'iroqlaridan avtomatik: 50 balldan past, har menejerga bir vaqtda ko'pi bilan 5 ta ochiq vazifa.") + (mine.length ? `<div class="space-y-2.5">${mine.slice(0, 100).map(t => taskCard(t, true)).join('')}</div>` : empty("Vazifa yo'q")), 'mb-6') +
+    card(h3('Xodimlar', "Xodim shu login bilan kirib, faqat o'z vazifalari va qo'ng'iroqlarini ko'radi. Filial rahbari — o'z filiali vazifalarini. Asosiy hisobotlar faqat adminlarga.") + (staffRows.length ? table([{ t: 'Ism', f: s => esc(s.name) }, { t: 'Email', f: s => esc(s.email) }, { t: 'Rol', f: s => s.role === 'manager' ? 'Menejer' : 'Filial rahbari' }, { t: 'Kim', f: s => esc(s.who || '—') }, { t: '', f: s => `<button onclick="removeStaff('${esc(s.user_id)}')" class="text-xs text-danger">O'chirish</button>` }], staffRows) : '') +
+      `<form onsubmit="addStaff(event)" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-4">
+        <input id="stName" required placeholder="Ism" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm">
+        <input id="stEmail" type="email" required placeholder="Email" autocomplete="off" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm">
+        <input id="stPass" type="password" required minlength="8" placeholder="Parol (kamida 8 belgi)" autocomplete="new-password" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm">
+        <select id="stRole" onchange="$('stMgr').hidden=this.value!=='manager';$('stBr').hidden=this.value==='manager'" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm"><option value="manager">Menejer</option><option value="branch">Filial rahbari</option></select>
+        <select id="stMgr" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm">${users.map(([id, n]) => `<option value="${esc(id)}">${esc(n)}</option>`).join('')}</select>
+        <input id="stBr" hidden placeholder="Filial nomi (masalan Xadra)" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm">
+        <button class="h-10 px-4 rounded-xl bg-fg text-surface text-sm font-semibold">Xodim qo'shish</button></form>`);
+}
+async function setTask(id, status) {
+  const patch = { status, done_at: status === 'new' ? null : new Date().toISOString() }, { error } = await sbc.from('tasks').update(patch).eq('id', id);
+  if (error) return alert(error.message);
+  const t = (S.data.tasks || []).find(x => x.id === id); if (t) Object.assign(t, patch);
+  S.staffMe ? staffRender() : render();
+}
+async function staffCall(body) {
+  const { data } = await sbc.auth.getSession();
+  const res = await fetch(`${SB_URL}/functions/v1/staff-admin`, { method: 'POST', headers: { authorization: `Bearer ${data.session?.access_token}`, apikey: SB_KEY, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(out.error || res.status);
+}
+async function addStaff(e) {
+  e.preventDefault();
+  const role = $('stRole').value;
+  try { await staffCall({ action: 'add', name: $('stName').value.trim(), email: $('stEmail').value.trim(), password: $('stPass').value, role, manager_id: role === 'manager' ? +$('stMgr').value : null, branch: role === 'branch' ? $('stBr').value.trim() : null }); }
+  catch (err) { return alert('Xato: ' + err.message); }
+  S.data.staff = await q('staff'); render();
+}
+async function removeStaff(user_id) {
+  if (!confirm("Bu xodimning kirish huquqi o'chirilsinmi?")) return;
+  try { await staffCall({ action: 'remove', user_id }); } catch (err) { return alert('Xato: ' + err.message); }
+  S.data.staff = await q('staff'); render();
+}
+// What a staff member sees after login: own tasks and own recent calls.
+async function staffBoot(me) {
+  S.staffMe = me;
+  const since = new Date(Date.now() - 30 * 864e5).toISOString();
+  const [tasks, calls] = await Promise.all([q('tasks', x => x.order('created_at', { ascending: false })), q('call_review', x => x.gte('call_start', since).not('rubric', 'is', null).order('call_start', { ascending: false }).limit(50))]);
+  S.data = { ...S.data, tasks, calls };
+  staffRender();
+}
+function staffRender() {
+  const { tasks, calls } = S.data, open = tasks.filter(t => t.status === 'new'), done = tasks.filter(t => t.status !== 'new').slice(0, 20);
+  const scored = calls.filter(c => c.total != null), avg = avgOf(scored, c => c.total);
+  $('app').innerHTML = `<div class="max-w-3xl mx-auto px-4 py-6"><div class="flex items-center justify-between mb-6"><div><h1 class="text-lg font-bold">${esc(S.staffMe.name)}</h1><p class="text-xs text-muted">Vazifalar va qo'ng'iroqlar</p></div><button onclick="sbc.auth.signOut().then(boot)" class="h-9 px-3 rounded-xl bg-surface border border-line text-sm">Chiqish</button></div>
+    <div class="grid grid-cols-2 gap-3 mb-6">${kpiTile('Ochiq vazifa', num(open.length), '', 'amber')}${kpiTile("O'rtacha ball", avg == null ? '—' : Math.round(avg), "oxirgi 30 kun, 100 dan", 'blue')}</div>
+    ${card(h3('Vazifalarim') + (open.length ? `<div class="space-y-2.5">${open.map(t => taskCard(t, false)).join('')}</div>` : empty("Ochiq vazifa yo'q")), 'mb-6')}
+    ${scored.length ? card(h3("Oxirgi qo'ng'iroqlarim") + `<div class="space-y-2.5">${scored.slice(0, 20).map(c => `<div class="rounded-2xl bg-surface2 p-4"><div class="flex justify-between gap-3 text-sm"><span class="font-semibold">${new Date(c.call_start).toLocaleDateString('uz')}</span>${scoreChip(c.total)}</div>${c.summary ? `<p class="text-[13px] mt-1.5">${esc(c.summary)}</p>` : ''}${c.advice ? `<p class="text-[13px] mt-1.5 font-medium">${esc(c.advice)}</p>` : ''}</div>`).join('')}</div>`, 'mb-6') : ''}
+    ${done.length ? card(h3('Bajarilganlar') + `<div class="space-y-2.5">${done.map(t => taskCard(t, false)).join('')}</div>`) : ''}</div>`;
+}
+
+const VIEWS = { plan: planPage, geo: geoPage, economy: economyPage, tasks: tasksPage, overview, funnel, daily, leads, money: moneyPage, cohort, creatives, pains, managers, calls, speed: speedPage, metrics: metricsPage, branches: branchesPage, status: statusPage, guide: guidePage, briefs, ai, settings };
 function render() { $('app').innerHTML = shell(S.data.funnel ? VIEWS[S.page]() : card(empty('Yuklanmoqda…'))); }
 // Starts the Meta / Bitrix / call syncs now (sync-now waits up to ~55 s), then reloads the data.
 async function syncNow() {
@@ -1286,7 +1498,7 @@ async function refresh() {
 
 function loginScreen(err = '') {
   $('app').innerHTML = `<div class="min-h-screen flex items-center justify-center px-4"><form onsubmit="login(event)" class="w-full max-w-sm bg-surface border border-line rounded-2xl shadow-card p-6 space-y-4">
-    <div><h1 class="text-xl font-bold">Sotuv auditi</h1><p class="text-xs text-muted mt-1">Admin akkaunti bilan kiring</p></div>
+    <div><h1 class="text-xl font-bold">Sotuv auditi</h1><p class="text-xs text-muted mt-1">Akkauntingiz bilan kiring</p></div>
     <input id="lgEmail" type="email" required placeholder="Email" autocomplete="email" class="w-full h-11 px-3 rounded-xl bg-surface2 border border-line text-sm">
     <input id="lgPass" type="password" required placeholder="Parol" autocomplete="current-password" class="w-full h-11 px-3 rounded-xl bg-surface2 border border-line text-sm">
     ${err ? `<p class="text-xs text-danger">${esc(err)}</p>` : ''}
@@ -1302,7 +1514,11 @@ async function boot() {
   const { data } = await sbc.auth.getSession();
   if (!data.session) return loginScreen();
   const { data: ok } = await sbc.rpc('is_admin');
-  if (!ok) { await sbc.auth.signOut(); return loginScreen('Bu akkaunt admin emas.'); }
+  if (!ok) {
+    const { data: me } = await sbc.from('staff').select('*').eq('user_id', data.session.user.id).maybeSingle();
+    if (me) return staffBoot(me);
+    await sbc.auth.signOut(); return loginScreen("Bu akkauntga ruxsat berilmagan.");
+  }
   refresh();
 }
 boot();
