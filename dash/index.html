@@ -1151,6 +1151,9 @@ const GUIDE = [
     ['Lead', "Bitrix'dagi har bir lead, barcha manbalar. «Target» — Meta reklamadan kelgan leadlar manbasi."],
     ['Sifatli lead', "Sozlamalarda belgilangan «sifatli» statuslardan biriga o'tgan lead (deyarli har doim deal ochilgan)."],
     ["Bog'lanib bo'lmadi", "Lead statusi «Bog'lanib bo'lmadi» yoki «6 marta bog'lanib bo'lmadi»."],
+    ['Reja va fakt', "Oy rejasidan kerakli lead, sifatli lead va byudjet hisoblanadi. Tanlangan davr rejasi = oy rejasi × kunlar / oydagi kunlar. Prognoz = shu oydagi sotuv ÷ o'tgan kunlar × oydagi kunlar."],
+    ['Lokatsiya isrofi', "Har reklama xarajati × shu reklama leadlaridan «Lokatsiya to'g'ri kelmadi» ulushi. Taxminiy hisob."],
+    ['Vazifalar', "50 balldan past sotuv qo'ng'iroqlaridan avtomatik yaratiladi, har menejerga ko'pi bilan 5 ta ochiq. Xodimlar o'z loginida faqat o'z vazifalarini ko'radi."],
     ['Sotuv', "Deal hozir «To'lov qildi», «Nabor guruh» yoki «Сделка успешна» bosqichida turibdi. Sana — deal shu 3 bosqichdan biriga BIRINCHI marta o'tgan kun (Bitrix bosqich tarixidan). Keyin «Сделка провалена»ga qaytarilsa, sotuvdan chiqadi. «Umumiy»da Sotuv kartochkasi har bosqichda hozir nechta turganini ko'rsatadi. «Sotuv sanasi» tugmasi — shu davrda YOPILGAN barcha sotuvlar (lead oldinroq kelgan bo'lishi mumkin). «Lid sanasi» — faqat shu davr leadlaridan chiqqan sotuvlar. Kun chegarasi — Toshkent vaqti."],
   ]],
   ['Formulalar', [
@@ -1350,7 +1353,7 @@ function planPage() {
     { t: 'Lead', r: 1, f: o => cell(o.leads, need.leads * o.s * scale), s: o => o.leads }, { t: 'Sifatli', r: 1, f: o => cell(o.qual, need.qual * o.s * scale), s: o => o.qual }, { t: 'Sotuv', r: 1, f: o => cell(o.sold, need.sales * o.s * scale), s: o => o.sold }], chanRows);
   // Branches
   const br = {}; for (const r of d.brDaily) { const o = br[r.branch] ??= { b: r.branch, leads: 0, qual: 0, sold: 0 }; o.leads += +r.leads; o.qual += +r.qual; o.sold += +r.won; }
-  const brList = Object.values(br).filter(o => o.b && !/^(Aniqlanmagan|Boshqa)/i.test(o.b)).sort((a, b) => b.leads - a.leads);
+  const brList = Object.values(br).filter(o => o.b && !/^(Aniqlanmagan|Boshqa|NOMA)/i.test(o.b)).sort((a, b) => b.leads - a.leads);
   const brShare = b => (+(p.branches?.[b] ?? 0)) / 100, brSum = brList.reduce((a, o) => a + +(p.branches?.[o.b] ?? 0), 0);
   const brTable = table([{ t: 'Filial', f: o => `<span class="font-semibold">${esc(o.b)}</span>`, s: o => o.b },
     { t: 'Ulush', r: 1, f: o => `<input data-br="${esc(o.b)}" type="number" min="0" max="100" value="${+(p.branches?.[o.b] ?? 0)}" class="w-16 h-8 px-2 rounded-lg bg-surface2 border border-line text-right">%`, s: o => brShare(o.b) },
@@ -1400,7 +1403,7 @@ function geoPage() {
 function economyPage() {
   const d = S.data, fx = +d.cfg?.fx_rate || 0, months = +d.cfg?.avg_months || 0;
   const rows = d.economy.filter(r => r.month >= '2026-07-01' && (+r.spend || +r.sales)).map(r => { const sales = +r.sales, spend = +r.spend, amount = +r.amount, check = div(amount, sales), cac = div(spend, sales), cacUzs = cac == null ? null : cac * fx, ltv = check != null && months ? check * months : null;
-    return { ...r, sales, spend, amount, check, cac, cacUzs, tCac: div(spend, +r.target_sales), roi1: div(check, cacUzs), ltv, ltvCac: div(ltv, cacUzs) }; });
+    return { ...r, sales, spend, amount, check, cac, cacUzs, tCac: div(spend, +r.target_sales), roi1: div(check, cacUzs), ltv, ltvCac: ltv == null ? null : div(ltv, cacUzs) }; });
   if (!rows.length) return card(empty("Ma'lumot yo'q"));
   const name = m => `${MONTH_FULL[+m.slice(5, 7) - 1]} ${m.slice(0, 4)}`, x = v => v == null ? '—' : v.toFixed(1) + '×';
   return card(`<form onsubmit="saveMonths(event)" class="flex flex-wrap items-end gap-3"><label class="block"><span class="block text-xs font-semibold mb-1.5">O'quvchi o'rtacha necha oy o'qiydi</span><input id="cfMonths" type="number" min="0" step="0.1" value="${months || ''}" class="w-40 h-10 px-3 rounded-xl bg-surface2 border border-line text-sm"></label><button class="h-10 px-4 rounded-xl bg-fg text-surface text-sm font-semibold">Saqlash</button><p class="text-xs text-muted max-w-xl">Bitrix'da to'lovlar yuritilmayapti («Всего оплачено» bo'sh), shuning uchun LTV = o'rtacha deal summasi × shu oylar. Bu sizning taxminingizga bog'liq.</p></form>`, 'mb-6') +

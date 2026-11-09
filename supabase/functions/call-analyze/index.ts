@@ -1,4 +1,5 @@
-// Call-recording analysis: Bitrix telephony recordings → Gemini (free tier, audio input) → call_review.
+// Call-recording analysis: Bitrix telephony recordings → Gemini (free tier) → call_review.
+// Two steps: Flash writes the dialogue once from the audio; a stronger model then scores the saved text.
 // Reads Bitrix only (voximplant.statistic.get, disk.file.get); never changes portal settings.
 //   POST /call-analyze            cron: analyse the newest queued calls (queue is filled by sync-calls)
 //   POST /call-analyze?pains=1    backfill: client pains for calls analysed before `pains` existed (text only, no audio)
@@ -9,6 +10,8 @@ import { bx } from "../_shared/bitrix.ts";
 
 const LIMIT = 8, PARALLEL = 2, BUDGET_MS = 125_000;
 const MODELS = [Deno.env.get("GEMINI_AUDIO_MODEL") ?? "gemini-flash-latest", "gemini-flash-lite-latest"];
+// Pro's free quota is small, so only sales calls use it; when it runs out, Flash scores instead.
+const SCORE_MODELS = [Deno.env.get("GEMINI_SCORE_MODEL") ?? "gemini-pro-latest", ...MODELS];
 
 // Built from the company sales script (Miro "Sotuv ssenariysi"); keep in sync with RUBRIC in platform/audit.html.
 const RUBRIC: [string, string, [string, number, string][]][] = [
@@ -92,17 +95,26 @@ JSON qaytaring (matnlar o'zbek tilida):
 - next_step: keyingi qadam kelishildimi va qanday
 - advice: operatorga eng muhim 1 ta maslahat`;
 
+// Step 1 only needs the words and who said them.
+const LISTEN_PROMPT = `Audio — Robbit akademiyasi operatori va ota-ona (mijoz) qo'ng'irog'i (o'zbek/rus tilida). Dialogni so'zma-so'z yozing, faqat eshitganingizni.
+Har qator "Avtojavob: …" (yozib qo'yilgan ovoz), "Operator: …" (Robbit xodimi) yoki "Mijoz: …" (ota-ona yoki bola). Qo'ng'iroq yo'nalishi: {DIRECTION}. Chiquvchi qo'ng'iroqda birinchi "Allo" degan odatda Mijoz; kiruvchida avtojavobdan keyin birinchi gapirgan odatda Operator. Bitta odamning ketma-ket gaplarini bitta qatorga birlashtiring. Shaxsiy raqam va manzilni [yashirildi] bilan almashtiring.
+call_type: "sotuv" (yangi mijozga kurs sotish/maslahat), "eslatma" (dars, to'lov, workshop eslatmasi), "xizmat" (mavjud o'quvchi masalasi), "boshqa".`;
+const SCORE_PROMPT = PROMPT
+  .replace("Audio — operator va ota-ona (mijoz) qo'ng'irog'i (o'zbek/rus tilida). Faqat eshitganingizga tayaning, o'ylab topmang.", "Quyida operator va ota-ona (mijoz) qo'ng'irog'ining dialogi. Faqat dialogda bor narsaga tayaning, o'ylab topmang.")
+  .replace(/- transcript: .*\n/, "");
+
 const STR = { type: "STRING" }, STRS = { type: "ARRAY", items: STR };
+const LISTEN_SCHEMA = { type: "OBJECT", properties: { transcript: STR, call_type: STR }, required: ["transcript", "call_type"] };
 const SCHEMA = {
   type: "OBJECT",
   properties: {
-    transcript: STR, call_type: STR, summary: STR, outcome: STR, interest: { type: "INTEGER" },
+    call_type: STR, summary: STR, outcome: STR, interest: { type: "INTEGER" },
     rubric: { type: "ARRAY", items: { type: "OBJECT", properties: { code: STR, points: { type: "INTEGER" }, applicable: { type: "BOOLEAN" }, evidence: STR }, required: ["code", "points", "applicable", "evidence"] } },
     socratic_note: STR, fab_note: STR, objections: STRS, pains: STRS,
     mistakes: { type: "ARRAY", items: { type: "OBJECT", properties: { moment: STR, problem: STR, better: STR }, required: ["moment", "problem", "better"] } },
     good: STRS, next_step: STR, advice: STR, script_note: STR,
   },
-  required: ["transcript", "call_type", "summary", "outcome", "interest", "rubric", "socratic_note", "fab_note", "objections", "mistakes", "good", "next_step", "advice"],
+  required: ["call_type", "summary", "outcome", "interest", "rubric", "socratic_note", "fab_note", "objections", "mistakes", "good", "next_step", "advice"],
 };
 
 // Points clamped to each criterion's max; non-applicable criteria leave the denominator, totals scaled to 100.
@@ -133,19 +145,18 @@ async function audioOf(c: Any): Promise<{ data: Uint8Array; mime: string }> {
   return { data, mime: mime.startsWith("audio/") ? mime : "audio/mpeg" };
 }
 
-// Company sales script (e.g. the Miro board), stored in audit_settings.sales_script; optional.
-async function analyse(audio: { data: Uint8Array; mime: string }, script: string, direction: string) {
+// One Gemini JSON request, trying each model in turn until one answers or the time runs out.
+async function gemini(models: string[], parts: Any[], schema: Any, until: number) {
   const key = Deno.env.get("GEMINI_API_KEY");
   if (!key) throw new Error("GEMINI_API_KEY yo'q");
-  const body = JSON.stringify({
-    contents: [{ role: "user", parts: [{ text: PROMPT.replace("{DIRECTION}", direction || "noma'lum") + (script ? `\n\nKOMPANIYA SOTUV SKRIPTI (operator shunga amal qilishi kerak):\n${script.slice(0, 20000)}\nscript_note: skriptning qaysi bosqichlari bajarildi, qaysilari o'tkazib yuborildi va skriptdagi qaysi gapni aytish kerak edi (1–3 jumla).` : "") }, { inlineData: { mimeType: audio.mime, data: encodeBase64(audio.data) } }] }],
-    generationConfig: { responseMimeType: "application/json", responseSchema: SCHEMA, temperature: 0.2 },
-  });
+  const body = JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { responseMimeType: "application/json", responseSchema: schema, temperature: 0.2 } });
   let last = "";
-  for (const model of MODELS) {
+  for (const model of models) {
+    const left = until - Date.now();
+    if (left < 5000) break;
     try {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-        method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": key }, body, signal: AbortSignal.timeout(70000),
+        method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": key }, body, signal: AbortSignal.timeout(Math.min(left, 55000)),
       });
       const r = await res.json();
       if (!res.ok) { last = `${model} ${res.status}: ${r?.error?.message ?? ""}`; continue; }
@@ -153,8 +164,15 @@ async function analyse(audio: { data: Uint8Array; mime: string }, script: string
       return { model, ...JSON.parse(text) };
     } catch (e) { last = `${model}: ${e}`; }
   }
-  throw new Error(last);
+  throw new Error(last || "vaqt tugadi");
 }
+
+const listen = (audio: { data: Uint8Array; mime: string }, direction: string, until: number) =>
+  gemini(MODELS, [{ text: LISTEN_PROMPT.replace("{DIRECTION}", direction || "noma'lum") }, { inlineData: { mimeType: audio.mime, data: encodeBase64(audio.data) } }], LISTEN_SCHEMA, until);
+
+// Company sales script (e.g. the Miro board), stored in audit_settings.sales_script; optional.
+const judge = (transcript: string, callType: string, script: string, direction: string, until: number) =>
+  gemini(callType === "sotuv" ? SCORE_MODELS : MODELS, [{ text: SCORE_PROMPT.replace("{DIRECTION}", direction || "noma'lum") + (script ? `\n\nKOMPANIYA SOTUV SKRIPTI (operator shunga amal qilishi kerak):\n${script.slice(0, 20000)}\nscript_note: skriptning qaysi bosqichlari bajarildi, qaysilari o'tkazib yuborildi va skriptdagi qaysi gapni aytish kerak edi (1–3 jumla).` : "") + `\n\nDIALOG:\n${transcript}` }], SCHEMA, until);
 
 const idOf = (c: Any) => String(c.CALL_ID ?? c.ID);
 
@@ -197,14 +215,15 @@ Deno.serve(async (req) => {
       .map((p: Any) => ({ CALL_ID: p.call_id, RECORD_FILE_ID: p.record_file_id, direction: p.direction }));
 
     let ok = 0, failed = 0;
-    const one = async (c: Any) => {
-      const row: Any = { call_id: idOf(c), analyzed_at: new Date().toISOString(), requeue: false };
+    // Scores a saved transcript; on failure the transcript stays and only this step is retried next run.
+    const scoreAndSave = async (row: Any, transcript: string, listenedType: string, listenModel: string | null, direction: string) => {
+      const until = Math.min(Date.now() + 60_000, deadline + 15_000);
       try {
-        const a = await analyse(await audioOf(c), script, c.direction);
+        const a = await judge(transcript, listenedType, script, direction, until);
         // Only sales calls are scored; reminders and service calls stay out of managers' averages.
         const s = score(a.call_type === "sotuv" ? a.rubric : CRITERIA.map((c) => ({ code: c.code, applicable: false })));
         Object.assign(row, {
-          model: a.model, call_type: a.call_type, transcript: a.transcript, summary: a.summary, outcome: a.outcome, interest: a.interest,
+          model: listenModel ? `${listenModel} + ${a.model}` : a.model, call_type: a.call_type, summary: a.summary, outcome: a.outcome, interest: a.interest,
           rubric: s.rows.map(({ code, points, applicable, evidence }) => ({ code, points, applicable, evidence })),
           stages: s.stages, total: s.total, score: s.total == null ? null : Math.round(s.total / 10),
           socratic_note: a.socratic_note, fab_note: a.fab_note, objections: a.objections, pains: a.pains ?? [],
@@ -213,15 +232,37 @@ Deno.serve(async (req) => {
         });
         ok++;
       } catch (e) {
-        row.error = String(e).slice(0, 500);
+        row.error = ("baho: " + String(e)).slice(0, 500);
         failed++;
       }
       await upsert("call_review", [row], "call_id");
     };
+    const one = async (c: Any) => {
+      const row: Any = { call_id: idOf(c), analyzed_at: new Date().toISOString(), requeue: false };
+      try {
+        const heard = await listen(await audioOf(c), c.direction, Math.min(Date.now() + 60_000, deadline));
+        row.transcript = heard.transcript;
+        await upsert("call_review", [row], "call_id"); // the audio is never sent twice
+        await scoreAndSave(row, heard.transcript, heard.call_type, heard.model, c.direction);
+      } catch (e) {
+        row.error = String(e).slice(0, 500);
+        failed++;
+        await upsert("call_review", [row], "call_id");
+      }
+    };
+    // Calls already written down but not scored go first: they cost no audio.
+    const { data: unscored } = await sb.from("call_review").select("call_id, transcript, call_type, direction").not("transcript", "is", null).is("rubric", null).order("call_start", { ascending: false }).limit(LIMIT);
+    for (const u of unscored ?? []) {
+      if (Date.now() > deadline - 75_000) break;
+      await scoreAndSave({ call_id: u.call_id, analyzed_at: new Date().toISOString() }, u.transcript, u.call_type ?? "sotuv", null, u.direction);
+      await sleep(1500);
+    }
     for (let i = 0; i < todo.length && Date.now() < deadline - 75_000; i += PARALLEL) {
       await Promise.all(todo.slice(i, i + PARALLEL).map(one));
       await sleep(2000); // stay under the free-tier requests/minute limit
     }
+    const { error: taskErr } = await sb.rpc("generate_call_tasks");
+    if (taskErr) console.error("generate_call_tasks", taskErr.message);
     const { count } = await sb.from("call_review").select("call_id", { count: "exact", head: true }).is("transcript", null).gte("call_start", since);
     return json({ ok: true, analysed: ok, failed, pending: count });
   } catch (e) {
