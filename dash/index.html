@@ -140,14 +140,18 @@ function calendar() {
     </div></div>`;
 }
 // Sidebar menu, grouped.
-const NAV = [
-  ['Tahlil', [['overview', 'Umumiy', 'ph-squares-four'], ['metrics', 'Kunlik metrikalar', 'ph-table'], ['branches', 'Filiallar', 'ph-buildings'], ['funnel', 'Voronka', 'ph-funnel'], ['daily', 'Kunlar va manbalar', 'ph-calendar-dots'], ['leads', 'Lead tahlili', 'ph-clock'], ['cohort', "Sotuv qachon bo'ladi", 'ph-calendar-check'], ['money', "To'lovlar va sikl", 'ph-wallet']]],
-  ['Marketing', [['creatives', 'Kreativlar', 'ph-film-strip'], ['pains', "Og'riqlar va e'tirozlar", 'ph-chat-circle-text'], ['briefs', 'Brieflar', 'ph-note-pencil']]],
-  ['Jamoa', [['managers', 'Menejerlar', 'ph-users'], ['calls', "Qo'ng'iroqlar tahlili", 'ph-phone'], ['speed', 'Aloqa tezligi', 'ph-timer']]],
-  ['AI', [['ai', 'AI yordamchi', 'ph-sparkle']]],
-  ['', [['status', 'Holat va eslatmalar', 'ph-bell-ringing'], ['guide', "Yo'riqnoma", 'ph-book-open'], ['settings', 'Sozlamalar', 'ph-gear']]],
-];
-const PAGES = NAV.flatMap(([, items]) => items);
+// Sidebar: nine entries. Related screens live as tabs inside an entry (TABS).
+const NAV = [['', [['overview', 'Umumiy', 'ph-squares-four'], ['funnel', 'Voronka', 'ph-funnel'], ['branches', 'Filiallar', 'ph-buildings'],
+  ['daily', 'Manbalar va kunlar', 'ph-calendar-dots'], ['cohort', 'Sotuv va pul', 'ph-wallet'], ['creatives', 'Marketing', 'ph-film-strip'], ['managers', 'Jamoa', 'ph-users'], ['settings', 'Sozlamalar', 'ph-gear']]]];
+const TABS = {
+  daily: [['daily', 'Kunlar va kanallar'], ['metrics', 'Kunlik metrikalar'], ['leads', 'Lead tahlili']],
+  cohort: [['cohort', "Sotuv qachon bo'ladi"], ['money', "To'lovlar va sikl"]],
+  creatives: [['creatives', 'Kreativlar'], ['briefs', 'Brieflar']],
+  managers: [['managers', 'Menejerlar'], ['calls', "Qo'ng'iroqlar"], ['pains', "Og'riqlar va e'tirozlar"], ['speed', 'Aloqa tezligi']],
+  settings: [['settings', 'Sozlamalar'], ['status', 'Holat'], ['guide', "Yo'riqnoma"], ['ai', 'AI yordamchi']],
+};
+const tabGroupOf = p => Object.keys(TABS).find(k => TABS[k].some(t => t[0] === p));
+const PAGES = [...NAV.flatMap(([, items]) => items), ...Object.values(TABS).flat()].reverse();
 
 // Pages through results: the API returns at most 1000 rows per request.
 // A failing view is retried once, then left empty with a warning, so one slow query never blanks the whole platform.
@@ -207,10 +211,16 @@ const opts = (vals, cur) => ['', ...vals].map(v => `<option value="${esc(v)}" ${
 const uniq = a => [...new Set(a.filter(Boolean))].sort();
 const match = r => (!S.course || r.course === S.course) && (!S.branch || r.branch === S.branch);
 
+function tabsBar() {
+  const g = tabGroupOf(S.page);
+  if (!g) return '';
+  return `<div class="flex gap-1 mb-5 overflow-x-auto border-b border-line -mt-1">${TABS[g].map(([k, t]) => `<button onclick="S.page='${k}';S.op=null;S.call=null;render();scrollTo(0,0)" class="px-3.5 h-10 whitespace-nowrap text-[13px] font-semibold border-b-2 -mb-px ${S.page === k ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg'}">${t}</button>`).join('')}</div>`;
+}
 function shell(body) {
   const d = S.data, title = (PAGES.find(p => p[0] === S.page) || [])[1] || '';
-  const sources = ['', ...uniq([...(d.daily || []), ...(d.cohortSrc || [])].map(r => r.source))];
-  const navItem = ([k, t, i]) => `<button onclick="S.page='${k}';S.menu=false;S.op=null;S.call=null;render();scrollTo(0,0)" class="nav-item ${S.page === k ? 'active' : ''} w-full flex items-center gap-2.5 px-3 h-9 rounded-lg text-[13px] font-medium text-muted hover:text-fg hover:bg-surface2 transition"><i class="ph-bold ${i} text-base"></i>${t}</button>`;
+  const present = new Set([...(d.daily || []), ...(d.cohortSrc || []), ...(d.wonDaily || [])].map(r => channelOf(r.source)));
+  const sources = ['', ...CHANNELS.filter(c => present.has(c))];
+  const navItem = ([k, t, i]) => `<button onclick="S.page='${k}';S.menu=false;S.op=null;S.call=null;render();scrollTo(0,0)" class="nav-item ${S.page === k || tabGroupOf(S.page) === k ? 'active' : ''} w-full flex items-center gap-2.5 px-3 h-9 rounded-lg text-[13px] font-medium text-muted hover:text-fg hover:bg-surface2 transition"><i class="ph-bold ${i} text-base"></i>${t}</button>`;
   const nav = NAV.map(([g, items]) => `${g ? `<div class="px-3 pt-4 pb-1.5 text-[10px] font-semibold tracking-[.14em] uppercase text-muted/70">${g}</div>` : '<div class="pt-4"></div>'}${items.map(navItem).join('')}`).join('');
   return `<div class="min-h-screen">
     <aside class="${S.menu ? 'flex' : 'hidden'} lg:flex fixed inset-y-0 left-0 z-30 w-60 flex-col bg-surface border-r border-line">
@@ -228,16 +238,35 @@ function shell(body) {
             <button onclick="syncNow()" ${S.syncing ? 'disabled' : ''} class="h-9 px-3 rounded-xl bg-surface border border-line flex items-center gap-1.5" title="Bitrix, Meta va qo'ng'iroqlarni hozir yangilash"><i class="ph-bold ph-arrows-clockwise ${S.syncing ? 'animate-spin' : ''}"></i><span class="hidden sm:inline">${S.syncing ? 'Yangilanmoqda…' : 'Yangilash'}</span></button>
             <button onclick="toggleTheme()" class="h-9 w-9 rounded-full bg-surface border border-line" aria-label="Rang rejimi" title="Yorug' / qora"><i class="ph-bold ${document.documentElement.classList.contains('dark') ? 'ph-sun' : 'ph-moon'}"></i></button>
             ${S.page === 'settings' ? '' : calendar()}
-            ${SOURCE_PAGES.includes(S.page) ? `<select onchange="S.source=this.value;render()" class="h-9 px-2 rounded-xl bg-surface border ${S.source ? 'border-accent text-accent' : 'border-line'}" aria-label="Manba">${sources.map(v => `<option value="${esc(v)}" ${v === S.source ? 'selected' : ''}>${v ? esc(v) : 'Barcha manbalar'}</option>`).join('')}</select>` : ''}
+            ${SOURCE_PAGES.includes(S.page) ? `<select onchange="S.source=this.value;render()" class="h-9 px-2 rounded-xl bg-surface border ${S.source ? 'border-accent text-accent' : 'border-line'}" aria-label="Kanal">${sources.map(v => `<option value="${esc(v)}" ${v === S.source ? 'selected' : ''}>${v ? esc(v) : 'Barcha kanallar'}</option>`).join('')}</select>` : ''}
           </div>
         </div>
       </header>
-      <div class="px-4 lg:px-8 py-6 max-w-[1400px]">${S.warn.length ? `<div class="mb-4 rounded-2xl border border-warn/40 bg-warn/10 text-[12.5px] p-3"><b>Ba'zi ma'lumotlar yuklanmadi</b> — «Yangilash»ni bosing. <span class="text-muted">${S.warn.map(esc).join(' · ')}</span></div>` : ''}${body}</div>
+      <div class="px-4 lg:px-8 py-6 max-w-[1400px]">${tabsBar()}${S.warn.length ? `<div class="mb-4 rounded-2xl border border-warn/40 bg-warn/10 text-[12.5px] p-3"><b>Ba'zi ma'lumotlar yuklanmadi</b> — «Yangilash»ni bosing. <span class="text-muted">${S.warn.map(esc).join(' · ')}</span></div>` : ''}${body}</div>
     </main>
   </div>`;
 }
 const SOURCE_PAGES = ['overview', 'cohort'];
-const bySource = rows => rows.filter(r => !S.source || r.source === S.source);
+// Bitrix sources grouped into the channels people talk about; S.source holds a channel name.
+const CHANNELS = ['Target', 'Kiruvchi', 'Filialga tashrif', "Najot Ta'lim", 'Direct', 'Telegram', 'Web sayt', 'Kasb test', 'Boshqa', 'Eski / leadsiz'];
+function channelOf(src) {
+  const s = String(src || '');
+  if (s === 'Target') return 'Target';
+  if (s === 'Звонок') return 'Kiruvchi';
+  if (/filial/i.test(s)) return 'Filialga tashrif';
+  if (/^Najot/.test(s)) return "Najot Ta'lim";
+  if (/^Direct/.test(s)) return 'Direct';
+  if (/^Telegram/.test(s)) return 'Telegram';
+  if (s === 'Веб-сайт') return 'Web sayt';
+  if (s === 'ROBBIT_KASB_TEST') return 'Kasb test';
+  if (/^(Eski lead|Leadsiz)/.test(s)) return 'Eski / leadsiz';
+  return 'Boshqa';
+}
+const bySource = rows => rows.filter(r => !S.source || channelOf(r.source) === S.source);
+const segBtn = (items, cur, set) => `<div class="inline-flex p-1 bg-surface2 rounded-xl text-xs font-semibold">${items.map(([k, t]) => `<button onclick="${set.replace('$', k)}" class="px-3 h-7 rounded-lg ${cur === k ? 'bg-surface shadow-sm text-fg' : 'text-muted hover:text-fg'}">${t}</button>`).join('')}</div>`;
+// Which sales a screen counts: those closed in the period, or those from the period's leads.
+const saleMode = () => (S.dateMode || 'sale') === 'sale';
+const dateToggle = () => segBtn([['sale', 'Sotuv sanasi'], ['lead', 'Lid sanasi']], S.dateMode || 'sale', "S.dateMode='$';render()");
 
 const maxCpql = course => S.data.courses.find(c => c.course === course)?.max_cpql;
 
@@ -261,26 +290,48 @@ function overview() {
   const stageOrder = ["To'lov qildi", 'Nabor guruh', 'Сделка успешна'];
   const wonStages = Object.entries(wonStage).sort((a, b) => (stageOrder.indexOf(a[0]) + 1 || 9) - (stageOrder.indexOf(b[0]) + 1 || 9))
     .map(([k, n]) => `${esc(k)}: <b>${num(n)}</b>`).join(' · ');
+  const salesN = saleMode() ? won.n : t.won;
   const wonTarget = S.data.wonDaily.filter(r => r.source === 'Target').reduce((a, r) => ({ n: a.n + +r.won, sum: a.sum + +r.amount }), { n: 0, sum: 0 });
   const romi = fx && spend ? div(wonTarget.sum - spend * fx, spend * fx) : null;
   const adKpis = spend ? `<div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
       ${kpi('Reklama xarajati', adMoney(spend), `Meta · ${num(metaLeads)} natija (Results)`, 'amber')}
       ${kpi('Lead narxi', adMoney(div(spend, paid.leads)), `Target: ${num(paid.leads)} lead Bitrix'da`, 'blue')}
       ${kpi('CPQL', adMoney(div(spend, paid.qual)), `sifatli lead narxi · ${num(paid.qual)} ta`, 'teal')}
-      ${kpi('Sotuv narxi', adMoney(div(spend, won.n)), `${adMoney(spend, false)} ÷ ${num(won.n)} ta sotuv (shu davrda «To'lov qildi» / «Nabor guruh» / «Успешна»ga o'tgan, barcha manbalar)`, 'green')}
+      ${kpi('Sotuv narxi', adMoney(div(spend, salesN)), `${adMoney(spend, false)} ÷ ${num(salesN)} ta sotuv${S.source ? ` (${esc(S.source)})` : ' (barcha kanallar)'}`, 'green')}
       ${kpi('ROMI', pct(romi), fx ? `tushum ${moneyShortTop(wonTarget.sum)} so'm · kurs ${num(fx)}` : 'kurs yo\'q', 'violet')}
     </div>` : '';
   const days = Math.round((new Date(S.to) - new Date(S.from)) / 864e5) + 1;
-  return `<div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
+  return `<div class="flex flex-wrap items-center gap-3 mb-4">${segBtn([['', 'Marketing (hammasi)'], ['Target', 'Target']], S.source === 'Target' ? 'Target' : '', "S.source='$';render()")}${dateToggle()}<span class="text-[11px] text-muted">${saleMode() ? "Sotuv — shu davrda yopilgan barcha sotuvlar" : "Sotuv — faqat shu davrda kelgan leadlardan"}</span></div>
+    <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
       ${kpi('Jami leadlar', num(t.leads), `${fmtDay(S.from)}${S.from !== S.to ? ' — ' + fmtDay(S.to) : ''} · kuniga ~${num(t.leads / days)}`, 'violet', true)}
       ${kpi('Sifatli', num(t.qual), pct(div(t.qual, t.leads)) + ' leaddan', 'teal')}
-      ${kpi('Sotuv', num(won.n), `${wonStages ? wonStages + '<br>' : ''}shu davrda sotuvga o'tgan · ${num(t.won)} tasi shu davr leadlaridan`, 'green')}
+      ${kpi('Sotuv', num(salesN), saleMode() ? `${wonStages ? wonStages + '<br>' : ''}shu davrda sotuvga o'tgan · ${num(t.won)} tasi shu davr leadlaridan` : `shu davr leadlaridan · davrda jami ${num(won.n)} ta sotuv yopilgan`, 'green')}
       ${kpi('Jarayonda', num(t.in_progress), 'hali hal bo\'lmagan', 'amber')}
       ${kpi('Sifatsiz', num(t.junk), pct(div(t.junk, t.leads)) + ' leaddan', 'crimson')}
     </div>` +
     rings([['Aloqa', div(t.contacted, t.leads), 'blue'], ['Sifatli', div(t.qual, t.leads), 'teal'], ['Deal', div(t.deals, t.leads), 'violet'], ['Filialga keldi', div(t.came_to_branch, t.leads), 'amber'], ['Sotuv', div(t.won, t.leads), 'green'], ['Sifatsiz', div(t.junk, t.leads), 'rose']], 'Jami leadlardan qanchasi qayergacha borgan') +
     (spend ? adKpis : `<div class="mb-6 text-xs text-muted">Tanlangan davrda reklama xarajati yo'q.</div>`) +
-    card(h3(S.source ? `Manba: ${esc(S.source)}` : 'Manbalar', "Tanlangan davrdagi leadlar va ular qayergacha borgani") + outcomeTable('Manba', groupSum(rows, r => r.source).sort((a, b) => b.leads - a.leads), r => `<button onclick="S.source='${esc(r.key).replace(/'/g, "\\'")}';render()" class="font-semibold hover:text-accent text-left">${esc(r.key)}</button>`));
+    channelTable(rows, S.data.wonDaily);
+}
+
+// Channels on the overview: every sale lands in a row, so the footer equals the Sotuv card.
+function channelTable(rows, wonRows) {
+  const by = {}; const blank = key => ({ key, leads: 0, qual: 0, in_progress: 0, junk: 0, won: 0, sold: 0 });
+  for (const o of groupSum(rows, r => channelOf(r.source))) Object.assign(by[o.key] ??= blank(o.key), { leads: o.leads, qual: o.qual, in_progress: o.in_progress, junk: o.junk, won: o.won });
+  for (const r of bySource(wonRows)) (by[channelOf(r.source)] ??= blank(channelOf(r.source))).sold += +r.won;
+  const sale = saleMode(), val = o => sale ? o.sold : o.won;
+  const list = Object.values(by).filter(o => o.leads || val(o)).sort((a, b) => b.leads - a.leads);
+  const foot = list.reduce((t, o) => { for (const k of ['leads', 'qual', 'in_progress', 'junk', 'won', 'sold']) t[k] += o[k]; return t; }, { ...blank('Jami'), _foot: true });
+  const q = o => div(o.qual, o.leads), avg = q(foot);
+  return card(h3(S.source ? `Kanal: ${esc(S.source)}` : 'Kanallar', `Lead, sifatli va jarayondagilar — shu davrda kelgan leadlar. Sotuv — ${sale ? "shu davrda yopilganlar, lead qachon kelganidan qat'i nazar" : 'faqat shu davr leadlaridan'}.`) + table([
+    { t: 'Kanal', f: o => o._foot ? 'Jami' : `<button onclick="S.source='${esc(o.key).replace(/'/g, "\\'")}';render()" class="font-semibold hover:text-accent text-left">${esc(o.key)}</button>`, s: o => o.key },
+    { t: 'Leadlar', r: 1, s: o => o.leads, f: o => num(o.leads) },
+    { t: 'Sifatli', r: 1, s: o => o.qual, f: o => num(o.qual) },
+    { t: 'Sifatli %', r: 1, s: o => q(o) ?? -1, f: o => o._foot || q(o) == null ? pct(q(o)) : chip(pct(q(o)), q(o) >= avg ? 'success' : 'danger') },
+    { t: 'Sotuv', r: 1, s: val, f: o => num(val(o)) },
+    { t: 'Jarayonda', r: 1, s: o => o.in_progress, f: o => num(o.in_progress) },
+    { t: 'Sifatsiz', r: 1, s: o => o.junk, f: o => num(o.junk) },
+  ], list, foot));
 }
 
 // Sales counted by the month they happened, split by the month the lead came in.
@@ -320,7 +371,7 @@ function salesKanban(cohortList) {
     const mine = rows.filter(r => r.sale_month === m), won = mine.filter(r => r.kind === 'won'), paid = mine.filter(r => r.kind === 'paid');
     const total = won.reduce((a, r) => a + +r.sales, 0), paidN = paid.reduce((a, r) => a + +r.sales, 0);
     const byAge = {}; for (const r of won) byAge[r.age] = (byAge[r.age] || 0) + +r.sales;
-    const src = {}; for (const r of won) { const o = src[r.source] ??= { n: 0, by: {} }; o.n += +r.sales; o.by[r.age] = (o.by[r.age] || 0) + +r.sales; }
+    const src = {}; for (const r of won) { const o = src[channelOf(r.source)] ??= { n: 0, by: {} }; o.n += +r.sales; o.by[r.age] = (o.by[r.age] || 0) + +r.sales; }
     const cards = Object.entries(src).sort((a, b) => b[1].n - a[1].n).map(([name, o]) => `<div class="rounded-2xl bg-surface2 p-3.5">
         <div class="flex items-baseline justify-between gap-2"><span class="text-[13px] font-semibold truncate">${esc(name)}</span><span class="text-lg font-bold tabular-nums">${num(o.n)}</span></div>
         <div class="mt-2">${seg(o.by, o.n)}</div>
@@ -332,7 +383,7 @@ function salesKanban(cohortList) {
       ${seg(byAge, total)}
       <div class="grid grid-cols-2 gap-2">${AGE.filter(([a]) => byAge[a]).map(([a, l, c]) => `<div class="rounded-xl px-3 py-2" style="background:rgb(var(--c-${c}) / .12)"><div class="text-lg font-bold tabular-nums" style="color:rgb(var(--c-${c}))">${byAge[a]}</div><div class="text-[11px] text-muted">${l}</div></div>`).join('')}</div>
       ${cr != null ? `<div class="rounded-xl border border-dashed border-line px-3 py-2 text-xs text-muted">→ Keyingi oyga o'tdi: <b class="text-fg tabular-nums">${num(cr)}</b> ta lead${cur ? ' (oy hali tugamagan)' : ''}</div>` : ''}
-      <div class="text-[11px] uppercase tracking-wide text-muted mt-1">Manbalar bo'yicha</div>
+      <div class="text-[11px] uppercase tracking-wide text-muted mt-1">Kanallar bo'yicha</div>
       <div class="flex flex-col gap-2">${cards}</div></div>`;
   };
   return card(h3(`Oy bo'yicha sotuvlar${S.source ? ' — ' + esc(S.source) : ''}`, "Har ustun — sotuv bo'lgan oy. Raqamlar sotuv qaysi oy leadidan kelganini ko'rsatadi. «Eski leadlar» — 2 oydan oldingi yoki platformaga yuklanmagan leadlar (iyuldan oldin).") +
@@ -466,7 +517,7 @@ const STEP_INFO = {
   qual: "Status «Качественный лид»",
   deals: "Leaddan sdelka ochilgan",
   came_to_branch: "Sdelka «Filialga keldi» yoki undan keyingi bosqichda",
-  won: "Shu davr leadlaridan sotuvga aylanganlar (sdelka hozir «To'lov qildi», «Nabor guruh» yoki «Сделка успешна»da)",
+  won: "Sdelka hozir «To'lov qildi», «Nabor guruh» yoki «Сделка успешна»da",
 };
 function sumBy(rows, keyFn) {
   const by = {};
@@ -479,27 +530,27 @@ function sumBy(rows, keyFn) {
   return Object.values(by);
 }
 const stepCell = (o, i) => { const v = o[STEPS[i][0]], prev = i ? o[STEPS[i - 1][0]] : null; return `${num(v)}${i ? `<div class="text-[10px] text-muted">${pct(div(v, prev))}</div>` : ''}`; };
-// Why the funnel's Sotuv differs from the «Umumiy» Sotuv card: the funnel follows this period's leads,
-// the card counts every deal that became a sale in this period, whenever its lead came in.
-function wonGap(cohort) {
-  const all = bySource(S.data.wonDaily).reduce((a, r) => a + +r.won, 0), older = all - cohort;
+// One line that ties the two sale counts together.
+function wonGap(cohort, all) {
+  const older = all - cohort;
   if (older <= 0) return '';
-  return `<div class="mt-4 p-3 rounded-xl bg-surface2 text-[13px] leading-relaxed"><i class="ph-bold ph-info text-muted"></i> Voronkadagi <b>${num(cohort)} ta sotuv</b> — faqat shu davrda kelgan leadlardan. «Umumiy»dagi <b>Sotuv ${num(all)}</b> esa shu davrda sotuvga o'tgan barcha deallar: ulardan <b>${num(older)} tasi</b> oldinroq (o'tgan oylarda) kelgan leadlar, ular bu voronkaga kirmaydi.</div>`;
+  return `<div class="mt-4 p-3 rounded-xl bg-surface2 text-[13px] leading-relaxed"><i class="ph-bold ph-info text-muted"></i> Shu davrda jami <b>${num(all)} ta sotuv</b> yopildi: <b>${num(cohort)} tasi</b> shu davr leadlaridan, <b>${num(older)} tasi</b> oldinroq kelgan leadlardan. «Sotuv sanasi» — hammasi, «Lid sanasi» — faqat shu davr leadlari.</div>`;
 }
 function funnel() {
   const rows = S.data.sales.filter(match);
   const [t] = sumBy(rows, () => 'all');
   if (!t) return card(empty("Lead yo'q"));
+  const allWon = S.data.wonDaily.reduce((a, r) => a + +r.won, 0), byDate = saleMode(), wonCaption = byDate ? "Shu davrda sotuvga o'tgan barcha deallar" : "Shu davr leadlaridan sotuvga aylanganlar";
   // Widths follow the square root of the share so the small bottom steps stay readable; exact numbers are printed.
   const COLORS = ['blue', 'violet', 'teal', 'violet', 'amber', 'green'];
   const bars = STEPS.map(([s, l], i) => {
-    const v = t[s], prev = i ? t[STEPS[i - 1][0]] : v, conv = div(v, prev), weak = i && conv != null && conv < 0.5, share = div(v, t.leads) || 0;
+    const eventStep = s === 'won' && byDate, v = eventStep ? allWon : t[s], prev = i ? t[STEPS[i - 1][0]] : v, conv = div(v, prev), weak = i && !eventStep && conv != null && conv < 0.5, share = Math.min(div(v, t.leads) || 0, 1);
     const w = Math.max(Math.sqrt(share) * 100, 14).toFixed(1);
-    const step = i ? `<div class="flex justify-center my-1"><span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold tabular-nums ${weak ? 'bg-danger/10 text-danger' : 'bg-surface2 text-muted'}"><i class="ph-bold ph-arrow-down"></i>${pct(conv)} o'tdi</span></div>` : '';
+    const step = i ? `<div class="flex justify-center my-1"><span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold tabular-nums ${weak ? 'bg-danger/10 text-danger' : 'bg-surface2 text-muted'}"><i class="ph-bold ph-arrow-down"></i>${eventStep ? "davrda yopilgan" : `${pct(conv)} o'tdi`}</span></div>` : '';
     return step + `<div class="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] items-center gap-3 sm:gap-5">
-      <div class="min-w-0"><div class="text-sm font-semibold">${l}</div><div class="text-[11px] text-muted leading-snug">${STEP_INFO[s]}</div></div>
+      <div class="min-w-0"><div class="text-sm font-semibold">${l}</div><div class="text-[11px] text-muted leading-snug">${s === 'won' ? wonCaption : STEP_INFO[s]}</div></div>
       <div class="flex justify-center"><div class="h-11 rounded-xl flex items-center justify-center text-white font-bold tabular-nums text-[15px] shadow-sm" style="width:${w}%;background:linear-gradient(90deg, rgb(var(--c-${COLORS[i]}) / .85), rgb(var(--c-${COLORS[i]})))">${num(v)}</div></div>
-      <div class="text-right"><div class="text-sm font-semibold tabular-nums">${pct(share)}</div><div class="text-[11px] text-muted">jami leaddan</div></div></div>`;
+      <div class="text-right">${eventStep ? `<div class="text-sm font-semibold tabular-nums">${pct(div(t.won, t.leads))}</div><div class="text-[11px] text-muted">shu davr leadlaridan</div>` : `<div class="text-sm font-semibold tabular-nums">${pct(share)}</div><div class="text-[11px] text-muted">jami leaddan</div>`}</div></div>`;
   }).join('');
   const cols = name => [{ t: name, f: o => `<span class="font-semibold">${esc(o.key)}</span>` }, ...STEPS.map(([, l], i) => ({ t: l, r: 1, f: o => stepCell(o, i) })),
     { t: 'Lead→sotuv', r: 1, s: o => div(o.won, o.leads) ?? -1, f: o => chip(pct(div(o.won, o.leads)), div(o.won, o.leads) >= div(t.won, t.leads) ? 'success' : 'danger') }, { t: 'Tushum', r: 1, f: o => money(o.revenue) }];
@@ -508,7 +559,7 @@ function funnel() {
     { t: "Deal yo'qotildi", r: 1, f: o => num(o.deal_lost) }, { t: 'Deal→sotuv', r: 1, s: o => div(o.won, o.deals) ?? -1, f: o => pct(div(o.won, o.deals)) }, { t: 'Tushum', r: 1, f: o => money(o.revenue) }];
   const byBranch = sumBy(rows.filter(r => r.deal_manager_id), r => r.deal_branch || 'Filial belgilanmagan').sort((a, b) => b.deals - a.deals);
   const byMgr = sumBy(rows.filter(r => r.deal_manager_id), r => r.deal_manager).filter(o => o.deals >= 5).sort((a, b) => b.won - a.won);
-  return card(h3('Umumiy voronka', `Tanlangan davrda (${fmtDay(S.from)}${S.from !== S.to ? ' — ' + fmtDay(S.to) : ''}) kelgan barcha leadlar. Bosqichlar orasidagi raqam — oldingi bosqichdan o'tganlar ulushi, 50% dan past bo'lsa qizil.`) + `<div>${bars}</div>` + wonGap(t.won), 'mb-6') +
+  return card(h3('Umumiy voronka', `Tanlangan davrda (${fmtDay(S.from)}${S.from !== S.to ? ' — ' + fmtDay(S.to) : ''}) kelgan barcha leadlar. Bosqichlar orasidagi raqam — oldingi bosqichdan o'tganlar ulushi, 50% dan past bo'lsa qizil.`) + `<div class="mb-4">${dateToggle()}</div><div>${bars}</div>` + wonGap(t.won, allWon), 'mb-6') +
     stageCards() +
     card(h3("Lead stadiyasi bo'yicha konversiya", "Hozir shu stadiyada turgan leadlar: ulardan nechtasi sotuvga aylangan, jarayonda, deal yopilgan yoki sifatsiz.") + outcomeTable('Stadiya', groupSum(S.data.statusOut, r => r.status_name).map(o => ({ ...o, sort: Math.min(...S.data.statusOut.filter(r => r.status_name === o.key).map(r => r.sort)) })).sort((a, b) => a.sort - b.sort), r => `<span class="font-semibold">${esc(r.key)}</span>`), 'mb-6') +
     card(h3("Operatorlar (kim gaplashgan)", "Lead egasi (call-markaz). Ustun nomini bosing — eng yuqori/past konversiya.") + outcomeTable('Operator', groupSum(S.data.operators, r => r.operator).filter(o => o.leads >= 20).sort((a, b) => b.leads - a.leads), r => `<span class="font-semibold">${esc(r.key)}</span>`), 'mb-6') +
@@ -550,8 +601,7 @@ function stageCards() {
     { t: 'Shu bosqichga yetgan', r: 1, s: o => reached(o) ?? -1, f: o => o.total ? num(dAll) : reached(o) == null ? '<span class="text-muted">—</span>' : num(reached(o)) },
     { t: "Oldingi bosqichdan o'tish", r: 1, s: o => { const p = prevOf(o); return p ? div(reached(o), reached(p)) ?? -1 : -1; }, f: o => { const p = !o.total && !isLost(o) && prevOf(o); return p ? chip(pct(div(reached(o), reached(p))), div(reached(o), reached(p)) >= 0.5 ? 'success' : 'danger') : ''; } },
   ], [{ name: 'Jami', n: dAll, total: true, sort: -1, stage: '' }, ...dl]);
-  return card(h3('Lead stadiyalari', `${num(all)} ta lead. <b>Hozir shu yerda</b> — lead aynan hozir shu statusda turibdi. <b>Kamida shu yergacha kelgan</b> — Bitrix'dagi statuslar tartibida shu status va undan keyingi barcha statuslardagi leadlar yig'indisi, ya'ni bu bosqichdan o'tib ketganlar ham kiradi. Masalan, «Qayta aloqa» qatoridagi son = hozir «Qayta aloqa», «Qaytgan lidlar», «Качественный лид» va undan keyingi (yopilgan) statuslardagi leadlar. Yopilgan statuslar (SPAM, Dublikat…) uchun «—»: lead qaysi bosqichda yopilgani Bitrix'da saqlanmaydi.`) + leadTable, 'mb-6') +
-    card(h3('Deal stadiyalari', `${num(dAll)} ta deal. Yo'qotilgan deal qaysi bosqichda yopilgani Bitrix'da saqlanmaydi, shuning uchun u «yetgan»ga qo'shilmaydi.`) + dealTable, 'mb-6');
+  return card(h3('Lead stadiyalari', `${num(all)} ta lead. <b>Hozir shu yerda</b> — lead aynan hozir shu statusda turibdi. <b>Kamida shu yergacha kelgan</b> — Bitrix'dagi statuslar tartibida shu status va undan keyingi barcha statuslardagi leadlar yig'indisi, ya'ni bu bosqichdan o'tib ketganlar ham kiradi. Masalan, «Qayta aloqa» qatoridagi son = hozir «Qayta aloqa», «Qaytgan lidlar», «Качественный лид» va undan keyingi (yopilgan) statuslardagi leadlar. Yopilgan statuslar (SPAM, Dublikat…) uchun «—»: lead qaysi bosqichda yopilgani Bitrix'da saqlanmaydi.`) + leadTable, 'mb-6');
 }
 
 // When leads arrive and from which phone operator codes (Tashkent time).
@@ -569,11 +619,6 @@ function leads() {
   const maxH = Math.max(...hours.map(o => o.leads)), avgQual = div(hours.reduce((a, o) => a + o.qual, 0), total);
   const bars = hours.map(o => { const qr = div(o.qual, o.leads);
     return `<div class="flex flex-col items-center gap-0.5 min-w-0" title="${o.key}:00–${o.key}:59 — ${o.leads} lead, ${o.qual} sifatli (${pct(qr)})"><div class="text-[9px] tabular-nums">${o.leads || ''}</div><div class="text-[9px] tabular-nums ${qr != null && qr >= avgQual ? 'text-success' : 'text-muted'}">${o.leads ? Math.round(qr * 100) + '%' : ''}</div><div class="w-full bg-surface2 rounded-t h-28 flex items-end"><div class="w-full rounded-t ${qr != null && qr >= avgQual ? 'bg-success' : 'bg-info/70'}" style="height:${(o.leads / maxH * 100).toFixed(0)}%"></div></div><div class="text-[10px] text-muted">${o.key}</div></div>`; }).join('');
-  // Weekday × hour heatmap (weekday from the Tashkent date).
-  const cell = {}; let maxC = 0;
-  for (const r of H) { const k = ((new Date(r.day + 'T00:00').getDay() + 6) % 7) + '-' + r.hour; cell[k] = (cell[k] || 0) + +r.leads; maxC = Math.max(maxC, cell[k]); }
-  const DOW = ['Du', 'Se', 'Ch', 'Pa', 'Ju', 'Sh', 'Ya'];
-  const heat = `<div class="overflow-x-auto"><table class="text-[10px] border-separate" style="border-spacing:2px"><thead><tr><th></th>${hours.map(o => `<th class="text-muted font-normal w-6">${o.key}</th>`).join('')}</tr></thead><tbody>${DOW.map((d, i) => `<tr><td class="pr-2 text-muted">${d}</td>${hours.map(o => { const v = cell[i + '-' + o.key] || 0; return `<td class="w-6 h-6 rounded text-center tabular-nums" title="${d} ${o.key}:00 — ${v} lead" style="background:rgb(var(--accent) / ${(v / maxC * 0.9).toFixed(2)})">${v >= maxC * 0.6 ? v : ''}</td>`; }).join('')}</tr>`).join('')}</tbody></table></div>`;
   const rateCols = name => [
     { t: 'Leadlar', r: 1, f: o => num(o.leads) }, { t: 'Ulushi', r: 1, f: o => pct(div(o.leads, total)), s: o => o.leads },
     { t: 'Sifatli', r: 1, f: o => num(o.qual) }, { t: 'Sifat %', r: 1, f: o => chip(pct(div(o.qual, o.leads)), div(o.qual, o.leads) >= avgQual ? 'success' : 'danger'), s: o => div(o.qual, o.leads) ?? -1 },
@@ -584,9 +629,7 @@ function leads() {
   const peak = [...hours].sort((a, b) => b.leads - a.leads).slice(0, 3).map(o => o.key + ':00').join(', ');
   return leadFindings(hours, H, ops, total, avgQual) + card(h3("Leadlar soat bo'yicha (Toshkent vaqti)", `${num(total)} ta lead. Eng ko'p: ${peak}. Ustun ustida: lead soni va sifatli ulushi. Yashil — sifat o'rtachadan (${pct(avgQual)}) yuqori.`) + `<div class="grid gap-0.5" style="grid-template-columns:repeat(24,minmax(0,1fr))">${bars}</div>`, 'mb-6') +
     card(h3('Har bir soat batafsil', "Ustun nomini bosing — eng yuqori/eng past bo'yicha saralanadi") + table([{ t: 'Soat', f: o => `${String(o.key).padStart(2, '0')}:00–${String(o.key).padStart(2, '0')}:59` }, ...rateCols()], hours.filter(o => o.leads)), 'mb-6') +
-    card(h3('Hafta kuni × soat', "Rang qanchalik to'q — shuncha ko'p lead. Katakka sichqonchani olib boring — aniq son.") + heat, 'mb-6') +
-    card(h3('Operatorlar', "Telefon kodi bo'yicha guruhlangan") + table([{ t: 'Operator', f: o => `<span class="font-semibold">${esc(o.key)}</span>` }, ...rateCols()], Object.values(ops).sort((a, b) => b.leads - a.leads)), 'mb-6') +
-    card(h3('Telefon kodlari', "Faqat kod saqlanadi (998 dan keyingi 2 raqam), to'liq raqam emas. «yo'q» — leadda raqam yo'q, «boshqa» — xorijiy yoki noto'g'ri yozilgan raqam.") + table([{ t: 'Kod', f: o => `<span class="font-semibold">${esc(o.key)}</span> <span class="text-xs text-muted">${operatorOf(o.key)}</span>` }, ...rateCols()], Object.values(codes).sort((a, b) => b.leads - a.leads)));
+    card(h3('Operatorlar', "Telefon kodi bo'yicha guruhlangan") + table([{ t: 'Operator', f: o => `<span class="font-semibold">${esc(o.key)}</span>` }, ...rateCols()], Object.values(ops).sort((a, b) => b.leads - a.leads)), 'mb-6');
 }
 
 // What the hour/weekday/operator data says, each with the step that fixes it.
@@ -621,7 +664,7 @@ const WD = ['Ya', 'Du', 'Se', 'Ch', 'Pa', 'Ju', 'Sh'];
 function daily() {
   const rows = S.data.daily;
   if (!rows.length) return card(empty("Tanlangan davrda lead yo'q"));
-  const bySrc = groupSum(rows, r => r.source).sort((a, b) => b.leads - a.leads);
+  const bySrc = groupSum(rows, r => channelOf(r.source)).sort((a, b) => b.leads - a.leads);
   const [tot] = groupSum(rows, () => 'all');
   const view = S.dailyView || 'src', picked = S.source;
   const rate = (o, k) => div(o[k], o.leads);
@@ -644,14 +687,14 @@ function daily() {
     { t: 'Jarayonda', r: 1, s: r => r.in_progress, f: r => num(r.in_progress) },
     { t: 'Sifatsiz', r: 1, s: r => rate(r, 'junk') ?? -1, f: r => cell(r.junk, r.leads) }];
   const seg = `<div class="inline-flex p-1 bg-surface2 rounded-xl text-xs font-semibold">${[['src', 'Manbalar'], ['day', 'Kunlar']].map(([k, t]) => `<button onclick="S.dailyView='${k}';render()" class="px-3 h-7 rounded-lg ${view === k ? 'bg-surface shadow-sm text-fg' : 'text-muted hover:text-fg'}">${t}</button>`).join('')}</div>`;
-  const srcSelect = `<select onchange="S.source=this.value;render()" class="h-9 px-2 rounded-xl bg-surface2 border border-line text-sm"><option value="">Barcha manbalar</option>${bySrc.map(o => `<option ${o.key === picked ? 'selected' : ''} value="${esc(o.key)}">${esc(o.key)} (${num(o.leads)})</option>`).join('')}</select>`;
+  const srcSelect = `<select onchange="S.source=this.value;render()" class="h-9 px-2 rounded-xl bg-surface2 border border-line text-sm"><option value="">Barcha kanallar</option>${bySrc.map(o => `<option ${o.key === picked ? 'selected' : ''} value="${esc(o.key)}">${esc(o.key)} (${num(o.leads)})</option>`).join('')}</select>`;
   const body = view === 'src'
-    ? table(cols('Manba', r => `<button onclick="S.source='${esc(r.key).replace(/'/g, "\\'")}';S.dailyView='day';render()" class="font-semibold hover:text-accent text-left">${esc(r.key)}</button>`), bySrc, tot)
-    : (() => { const ds = groupSum(rows.filter(r => !picked || r.source === picked), r => r.day).sort((a, b) => b.key.localeCompare(a.key)); const [t2] = groupSum(rows.filter(r => !picked || r.source === picked), () => 'all');
+    ? table(cols('Kanal', r => `<button onclick="S.source='${esc(r.key).replace(/'/g, "\\'")}';S.dailyView='day';render()" class="font-semibold hover:text-accent text-left">${esc(r.key)}</button>`), bySrc, tot)
+    : (() => { const ds = groupSum(bySource(rows), r => r.day).sort((a, b) => b.key.localeCompare(a.key)); const [t2] = groupSum(bySource(rows), () => 'all');
       return table(cols('Sana', r => `<span class="font-semibold tabular-nums">${r.key.slice(8)}.${r.key.slice(5, 7)}</span> <span class="text-xs text-muted">${WD[new Date(r.key + 'T00:00').getDay()]}</span>`), ds, t2); })();
   return card(`<div class="flex flex-wrap items-center gap-3 mb-4">${seg}${view === 'day' ? srcSelect : ''}</div>` +
-    h3(view === 'src' ? 'Manbalar: qaysi kanal sifatli lead va sotuv beradi' : `Kunlar${picked ? ' — ' + esc(picked) : ''}: qaysi kun leadlari yaxshi ishlandi`,
-      "Lead kelgan kun bo'yicha. Foizlar — o'sha qatordagi leadlardan. Yashil/qizil — o'rtachadan yuqori/past. Manba nomini bosing — o'sha manbaning kunlari ochiladi.") + findings + body);
+    h3(view === 'src' ? 'Kanallar: qaysi kanal sifatli lead va sotuv beradi' : `Kunlar${picked ? ' — ' + esc(picked) : ''}: qaysi kun leadlari yaxshi ishlandi`,
+      "Lead kelgan kun bo'yicha. Foizlar — o'sha qatordagi leadlardan. Yashil/qizil — o'rtachadan yuqori/past. Kanal nomini bosing — o'sha kanalning kunlari ochiladi.") + findings + body);
 }
 
 const moneyShort = n => n == null ? '—' : Math.abs(n) >= 1e9 ? (n / 1e9).toFixed(2) + ' mlrd' : Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(1) + ' mln' : num(n);
@@ -1091,7 +1134,7 @@ const GUIDE = [
     ['Lead', "Bitrix'dagi har bir lead, barcha manbalar. «Target» — Meta reklamadan kelgan leadlar manbasi."],
     ['Sifatli lead', "Sozlamalarda belgilangan «sifatli» statuslardan biriga o'tgan lead (deyarli har doim deal ochilgan)."],
     ["Bog'lanib bo'lmadi", "Lead statusi «Bog'lanib bo'lmadi» yoki «6 marta bog'lanib bo'lmadi»."],
-    ['Sotuv', "Deal hozir «To'lov qildi», «Nabor guruh» yoki «Сделка успешна» bosqichida turibdi. Sana — deal shu 3 bosqichdan biriga BIRINCHI marta o'tgan kun (Bitrix bosqich tarixidan). Keyin «Сделка провалена»ga qaytarilsa, sotuvdan chiqadi. «Umumiy»da Sotuv kartochkasi har bosqichda hozir nechta turganini ko'rsatadi. «Umumiy»da — tanlangan davrda YOPILGAN sotuvlar (lead oldinroq kelgan bo'lishi mumkin). Voronka va filiallarda — shu davr leadlaridan chiqqan sotuvlar."],
+    ['Sotuv', "Deal hozir «To'lov qildi», «Nabor guruh» yoki «Сделка успешна» bosqichida turibdi. Sana — deal shu 3 bosqichdan biriga BIRINCHI marta o'tgan kun (Bitrix bosqich tarixidan). Keyin «Сделка провалена»ga qaytarilsa, sotuvdan chiqadi. «Umumiy»da Sotuv kartochkasi har bosqichda hozir nechta turganini ko'rsatadi. «Sotuv sanasi» tugmasi — shu davrda YOPILGAN barcha sotuvlar (lead oldinroq kelgan bo'lishi mumkin). «Lid sanasi» — faqat shu davr leadlaridan chiqqan sotuvlar. Kun chegarasi — Toshkent vaqti."],
   ]],
   ['Formulalar', [
     ['CTR', "Bosishlar ÷ Ko'rsatishlar."], ['CPM', "Xarajat ÷ Ko'rsatishlar × 1000."],
@@ -1140,7 +1183,7 @@ function guidePage() {
 const tkTime = t => t ? new Date(t).toLocaleString('sv-SE', { timeZone: 'Asia/Tashkent' }).slice(5, 16) : '—';
 function speedPage() {
   // minutes = working-time wait (a night lead counts from 09:00); raw = clock time since the lead arrived.
-  const all = (S.data.speed || []).filter(r => !S.source || r.source === S.source).map(r => ({ ...r, raw: r.minutes, minutes: r.work_minutes ?? r.minutes }));
+  const all = bySource(S.data.speed || []).map(r => ({ ...r, raw: r.minutes, minutes: r.work_minutes ?? r.minutes }));
   if (!all.length) return card(empty("Hali ma'lumot yo'q: qo'ng'iroqlar tarixi yuklanmoqda (bir necha daqiqa)."));
   const called = all.filter(r => r.minutes != null), notCalled = all.filter(r => r.first_call_at == null);
   const med = xs => { const a = xs.map(Number).sort((x, y) => x - y); return a.length ? (a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2) : null; };
