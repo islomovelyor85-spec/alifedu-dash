@@ -207,6 +207,16 @@ async function queueStats() {
 
 // Dialog text is most of the volume, so it is fetched only when a call is opened.
 const CALL_COLS = 'call_id,call_start,operator_id,direction,duration,lead_id,deal_id,model,summary,outcome,interest,score,objections,mistakes,good,next_step,advice,error,analyzed_at,record_file_id,rubric,stages,total,mistakes_detail,fab_note,socratic_note,script_note,call_type,requeue,pains';
+// Calls are the heaviest list, so they arrive after the page is already on screen.
+async function loadCalls() {
+  if (ADMIN) return;
+  const id = S.callsReq = (S.callsReq || 0) + 1;
+  S.callsBusy = true;
+  const calls = await q('call_review', x => x.gte('call_start', S.from).lte('call_start', S.to + 'T23:59:59').order('call_start', { ascending: false }), CALL_COLS);
+  if (id !== S.callsReq) return;
+  S.data.calls = calls; S.callsBusy = false;
+  if (!/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName || '')) render();
+}
 async function load() {
   S.warn = [];
   const day = x => x.gte('day', S.from).lte('day', S.to);
@@ -221,7 +231,7 @@ async function load() {
     q('crm_statuses', x => x.eq('entity', 'USER')).then(r => Object.fromEntries(r.map(u => [u.status_id, u.name]))),
     q('v_deal_stages', day), q('v_lead_hours', day), q('v_lead_codes', day), q('v_daily_outcomes', day), q('v_operator_outcomes', day), q('v_status_outcomes', day), q('v_sales_cycle', day), q('v_deal_money', day), q('v_deal_lost_reasons', day), q('v_cohort_summary'), q('v_cohort_src'), q('v_spend_daily', day),
     q('ad_daily', x => x.gte('date', S.from).lte('date', S.to)), q('v_ad_leads', day), q('v_ad_catalog'), q('v_won_daily', day), q('v_sales_by_month', x => x.gte('sale_month', '2026-07-01')),
-    q('call_review', x => x.gte('call_start', S.from).lte('call_start', S.to + 'T23:59:59').order('call_start', { ascending: false }), CALL_COLS),
+    Promise.resolve([]),
     q('v_speed_to_lead', day), q('daily_metrics', x => x.order('day', { ascending: false })),
     q('v_daily_metrics', x => x.gte('day', iso(addDays(new Date(), -1)))), queueStats(),
     q('v_branch_daily', day), q('v_branch_spend_daily', day), q('v_branch_campaign', day),
@@ -814,6 +824,7 @@ function managerRows() {
 }
 
 function managers() {
+  if (S.callsBusy) return card(empty("Menejerlar ma'lumoti yuklanmoqda…"));
   if (S.call) return callDetail();
   if (S.op) return managerDetail();
   const rows = managerRows().sort((a, b) => b.leads - a.leads || b.calls.length - a.calls.length);
@@ -906,6 +917,7 @@ function rubricCard() {
 
 // AI review of Bitrix call recordings (call-analyze edge function, Gemini free tier), for the selected dates.
 function calls() {
+  if (S.callsBusy) return card(empty("Qo'ng'iroqlar yuklanmoqda…"));
   if (S.call) return callDetail();
   const all = S.data.calls || [], ok = analysed(), sales = ok.filter(isSale);
   const queued = all.filter(r => !r.rubric && !r.error).length, failed = all.filter(r => !r.rubric && r.error).length;
@@ -975,9 +987,9 @@ function settings() {
       ${field('cfMin', "Min. qo'ng'iroq (soniya)", c.min_call_seconds ?? 30, "Qisqaroq qo'ng'iroqlar tahlil qilinmaydi")}
       <button class="h-10 px-4 rounded-xl bg-fg text-surface text-sm font-semibold">Saqlash</button></form>`)}
     <div class="space-y-6">
-    ${card(h3('Reklama valyutasi va kurs', c.fx_manual ? "Kurs qo'lda kiritilgan — Markaziy bank kursi bilan almashtirilmaydi." : "Kurs har soatda Markaziy bankdan olinadi. O'zingiznikini kiritsangiz — shu ishlatiladi.") + `<div class="grid grid-cols-3 gap-3 text-sm mb-4"><div><div class="text-xs text-muted">Valyuta (Meta hisobi)</div><div class="font-semibold mt-1">${esc(c.ad_currency || '—')}</div></div><div><div class="text-xs text-muted">Kurs (so'm)</div><div class="font-semibold mt-1 tabular-nums">${c.fx_rate ? num(c.fx_rate) : '—'}</div></div><div><div class="text-xs text-muted">Sana</div><div class="font-semibold mt-1">${c.fx_date ? fmtDay(c.fx_date) : '—'} ${c.fx_manual ? chip("qo'lda", 'warn') : chip('MB', 'neutral')}</div></div></div>
-      <form onsubmit="saveFx(event)" class="flex flex-wrap items-end gap-2"><label class="block"><span class="block text-xs font-semibold mb-1.5">1 ${esc(c.ad_currency || 'USD')} = ? so'm</span><input id="cfFx" type="number" step="0.01" min="1" value="${c.fx_rate || ''}" class="w-40 h-10 px-3 rounded-xl bg-surface2 border border-line text-sm"></label>
-        <button class="h-10 px-4 rounded-xl bg-fg text-surface text-sm font-semibold">Kursni saqlash</button>${c.fx_manual ? `<button type="button" onclick="saveFx(event, true)" class="h-10 px-4 rounded-xl bg-surface2 text-sm font-semibold">Markaziy bank kursiga qaytish</button>` : ''}</form>`)}
+    ${card(h3('Reklama valyutasi va kurs', c.fx_manual ? "Kurs qo'lda kiritilgan, shuning uchun avtomatik yangilanmaydi. Avtomatikka qaytish uchun pastdagi tugmani bosing." : "Avtomatik: har soatda Markaziy bankdan tekshiriladi. Bank yangi kurs e'lon qilmagan kunlarda oxirgi kurs turadi.") + `<div class="grid grid-cols-3 gap-3 text-sm mb-4"><div><div class="text-xs text-muted">Valyuta (Meta hisobi)</div><div class="font-semibold mt-1">${esc(c.ad_currency || '—')}</div></div><div><div class="text-xs text-muted">Kurs (so'm)</div><div class="font-semibold mt-1 tabular-nums">${c.fx_rate ? num(c.fx_rate) : '—'}</div></div><div><div class="text-xs text-muted">Sana</div><div class="font-semibold mt-1">${c.fx_date ? fmtDay(c.fx_date) : '—'} ${c.fx_manual ? chip("qo'lda", 'warn') : chip('MB', 'neutral')}</div></div></div>
+      ${c.fx_manual ? '' : `<details><summary class="cursor-pointer text-xs text-muted">Qo'lda kiritish</summary><div class="mt-3">`}<form onsubmit="saveFx(event)" class="flex flex-wrap items-end gap-2"><label class="block"><span class="block text-xs font-semibold mb-1.5">1 ${esc(c.ad_currency || 'USD')} = ? so'm</span><input id="cfFx" type="number" step="0.01" min="1" value="${c.fx_rate || ''}" class="w-40 h-10 px-3 rounded-xl bg-surface2 border border-line text-sm"></label>
+        <button class="h-10 px-4 rounded-xl bg-fg text-surface text-sm font-semibold">Kursni saqlash</button>${c.fx_manual ? `<button type="button" onclick="saveFx(event, true)" class="h-10 px-4 rounded-xl bg-surface2 text-sm font-semibold">Markaziy bank kursiga qaytish</button>` : ''}</form>${c.fx_manual ? '' : '</div></details>'}`)}
     ${!S.data.courses.length ? '' : card(h3('Kurslar', 'max CPQL = o\'rtacha chek × reklama ulushi × sifatli→sotuv') + (S.data.courses.length ? `<div class="space-y-3">${S.data.courses.map(k => `<div class="grid grid-cols-4 gap-2 items-end text-sm" data-course="${esc(k.course)}">
         <div class="font-semibold pb-2 truncate">${esc(k.course)}</div>
         <label><span class="text-[11px] text-muted">Chek</span><input name="avg_check" value="${k.avg_check}" class="w-full h-9 px-2 rounded-lg bg-surface2 border border-line"></label>
@@ -1590,7 +1602,7 @@ async function syncNow() {
 }
 async function refresh() {
   $('app').innerHTML = shell(card(empty('Yuklanmoqda…')));
-  try { await load(); render(); } catch (e) { $('app').innerHTML = shell(card(`<p class="text-sm text-danger">${esc(e.message)}</p>`)); }
+  try { await load(); render(); loadCalls(); } catch (e) { $('app').innerHTML = shell(card(`<p class="text-sm text-danger">${esc(e.message)}</p>`)); }
 }
 
 function loginScreen(err = '') {
