@@ -9,9 +9,10 @@ import { Any, authorized, daysAgo, json, sb, sleep, upsert } from "../_shared/sy
 import { bx } from "../_shared/bitrix.ts";
 
 const LIMIT = 8, PARALLEL = 2, BUDGET_MS = 125_000;
-const MODELS = [Deno.env.get("GEMINI_AUDIO_MODEL") ?? "gemini-flash-latest", "gemini-flash-lite-latest"];
-// Pro's free quota is small, so only sales calls use it; when it runs out, Flash scores instead.
-const SCORE_MODELS = [Deno.env.get("GEMINI_SCORE_MODEL") ?? "gemini-pro-latest", ...MODELS];
+// Free-tier quota is per model, so each list falls through to the next model on a 429 (checked with gemini-check).
+const MODELS = [Deno.env.get("GEMINI_AUDIO_MODEL") ?? "gemini-3.6-flash", "gemini-3-flash-preview", "gemini-flash-lite-latest"];
+// Scoring is text only and uses the newest Flash while its quota lasts; Pro has no free quota on this key.
+const SCORE_MODELS = [Deno.env.get("GEMINI_SCORE_MODEL") ?? "gemini-3.8-flash", "gemini-3.7-flash", ...MODELS];
 
 // Built from the company sales script (Miro "Sotuv ssenariysi"); keep in sync with RUBRIC in platform/audit.html.
 const RUBRIC: [string, string, [string, number, string][]][] = [

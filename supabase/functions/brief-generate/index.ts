@@ -7,7 +7,8 @@ import { Any, sb } from "../_shared/sync.ts";
 
 const CORS = { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, x-client-info, apikey, content-type" };
 const json = (d: unknown, status = 200) => new Response(JSON.stringify(d), { status, headers: { ...CORS, "content-type": "application/json" } });
-const MODEL = Deno.env.get("GEMINI_TEXT_MODEL") ?? "gemini-flash-latest";
+// Free-tier quota is per model: a 429 moves on to the next one.
+const MODELS = [Deno.env.get("GEMINI_TEXT_MODEL") ?? "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3-flash-preview", "gemini-flash-lite-latest"];
 
 const top = (items: string[], n: number) => Object.entries(items.reduce((m: Record<string, number>, x) => {
   const k = x.toLowerCase().trim(); if (k) m[k] = (m[k] ?? 0) + 1; return m;
@@ -84,12 +85,17 @@ Har bir brief uchun (o'zbek tilida, lotin yozuvida, ota-onaga qaratilgan):
 - evidence: bu brief yuqoridagi qaysi raqamga asoslangani (1 jumla)
 Raqam va va'dalarni o'ylab topmang: narx, chegirma, kafolat aytilmagan bo'lsa yozmang.`;
 
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
-      method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": key }, signal: AbortSignal.timeout(100000),
-      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json", responseSchema: SCHEMA, temperature: 0.7 } }),
-    });
-    const r = await res.json();
-    if (!res.ok) throw new Error(`${res.status}: ${r?.error?.message ?? ""}`);
+    let r: Any = null, failure = "";
+    for (const model of MODELS) {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": key }, signal: AbortSignal.timeout(100000),
+        body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json", responseSchema: SCHEMA, temperature: 0.7 } }),
+      });
+      const body = await res.json();
+      if (res.ok) { r = body; break; }
+      failure = `${model} ${res.status}: ${body?.error?.message ?? ""}`;
+    }
+    if (!r) throw new Error(failure);
     const briefs = JSON.parse((r.candidates?.[0]?.content?.parts ?? []).map((p: Any) => p.text ?? "").join(""));
     const monday = new Date(); monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
     const rows = briefs.slice(0, 6).map((b: Any) => ({
