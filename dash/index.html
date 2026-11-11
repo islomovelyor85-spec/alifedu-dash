@@ -395,6 +395,7 @@ function delta(cur, prev, lowerBetter, fmt) {
   const d = (cur - prev) / Math.abs(prev), good = lowerBetter ? d < 0 : d > 0;
   return `<span class="text-[11.5px] font-semibold tabular-nums" style="color:rgb(var(--${Math.abs(d) < 0.005 ? 'muted' : good ? 'success' : 'danger'}))">${d >= 0 ? '↑' : '↓'} ${Math.abs(d * 100).toFixed(1)}%</span> <span class="text-[11px] text-muted">oldin ${fmt(prev)}</span>`;
 }
+// Overview as a bento board: every block shows its number with the chart that suits it.
 function overviewKpi(t) {
   const d = S.data, fx = +d.cfg?.fx_rate || 0, R = planRange(), days = rangeDays(), pr = prevRange();
   const spend = d.spend.reduce((a, r) => a + +r.spend, 0), pSpend = (d.prevSpend || []).reduce((a, r) => a + +r.spend, 0);
@@ -404,42 +405,116 @@ function overviewKpi(t) {
   const inRange = (p, f, to) => { const k = saleMode() ? p.day : p.lead_day; return k && k >= f && k <= to; };
   const pSales = (d.purchases || []).filter(p => inRange(p, pr.from, pr.to) && (!S.source || channelOf(p.source) === S.source));
   const tSales = salesList(true).filter(p => channelOf(p.source) === 'Target'), pTSales = (d.purchases || []).filter(p => inRange(p, pr.from, pr.to) && channelOf(p.source) === 'Target');
-  const tRev = tSales.reduce((a, p) => a + (+p.amount || 0), 0), pRev = pSales.reduce((a, p) => a + (+p.amount || 0), 0), months = +d.cfg?.avg_months || 0;
-  // Daily series for the trend lines.
+  const tRev = tSales.reduce((a, p) => a + (+p.amount || 0), 0), months = +d.cfg?.avg_months || 0;
   const by = (rows, f) => rows.reduce((m, r) => (m[r.day] = (m[r.day] || 0) + f(r), m), {});
   const spendD = by(d.spend, r => +r.spend), tLeadD = by(d.daily.filter(r => r.source === 'Target'), r => +r.leads), tQualD = by(d.daily.filter(r => r.source === 'Target'), r => +r.qual);
-  const tSaleD = tSales.reduce((m, p) => (m[p.mday] = (m[p.mday] || 0) + 1, m), {}), saleD = sales.reduce((m, p) => (m[p.mday] = (m[p.mday] || 0) + 1, m), {}), revD = sales.reduce((m, p) => (m[p.mday] = (m[p.mday] || 0) + (+p.amount || 0), m), {});
-  const usd = v => adMoney(v, false);
-  const mcard = (l, v, sub, line, color, extra = '') => `<div class="glow rounded-3xl p-5 border border-line/60"><div class="flex items-start justify-between gap-3"><div class="min-w-0"><div class="text-[12px] text-muted font-medium">${l}</div><div class="num-xl text-[26px] 2xl:text-[30px] font-bold leading-tight mt-1 tabular-nums whitespace-nowrap">${v}</div></div><div class="opacity-90 w-[84px] 2xl:w-[110px]">${line}</div></div><div class="mt-2 leading-snug">${sub}</div>${extra}</div>`;
-  const cpl = div(spend, T.leads), cpql = div(spend, T.qual), cac = div(spend, tSales.length);
+  const tSaleD = tSales.reduce((m, p) => (m[p.mday] = (m[p.mday] || 0) + 1, m), {});
   const romi = fx && spend ? div(tRev - spend * fx, spend * fx) : null, romiLtv = fx && spend && months > 1 ? div(tRev * months - spend * fx, spend * fx) : null;
-  const money = `<div class="grid sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-3">
-    ${mcard('Reklama xarajati', usd(spend), delta(spend, pSpend, false, usd) + (R.budget ? `<span class="text-[11px] text-muted"> · plan ${usd(R.budget)} (${pct(div(spend, R.budget))})</span>` : ''), spark(days.map(x => spendD[x] || 0), 'amber'), 'amber')}
-    ${mcard('Lid narxi (CPL)', usd(cpl), delta(cpl, div(pSpend, pT.leads), true, usd), spark(rolling(days, spendD, tLeadD), 'blue'), 'blue')}
-    ${mcard('Sifatli lid narxi', usd(cpql), delta(cpql, div(pSpend, pT.qual), true, usd), spark(rolling(days, spendD, tQualD), 'teal'), 'teal')}
-    ${mcard('Mijoz narxi (CAC)', usd(cac), delta(cac, div(pSpend, pTSales.length), true, usd), spark(rolling(days, spendD, tSaleD, 14), 'violet'), 'violet')}
-  </div><div class="grid sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
-    ${mcard('Tushum (1-oy)', somMoney(rev), delta(rev, pRev, false, somMoney), spark(days.map(x => revD[x] || 0), 'green'), 'green')}
-    ${mcard('Sotuvlar', num(sold), delta(sold, pSales.length, false, num), spark(days.map(x => saleD[x] || 0), 'green'), 'green')}
-    ${mcard('ROMI (Target)', pct(romi), `<span class="text-[11px] text-muted">1-oy tushumi bo'yicha${romiLtv != null ? ` · ${months} oy o'qisa <b class="text-fg">${pct(romiLtv)}</b>` : ''}</span>`, '', 'violet')}
-    ${mcard("O'rtacha chek", somMoney(div(rev, sold)), `<span class="text-[11px] text-muted">Xadra, Chimboy — 1 mln, viloyatlar — 700 ming so'm (1 oy)</span>`, '', 'green')}
-  </div>`;
-  return funnelPlan(t, sold, R) + money + forecastCard() + channelsCard(R) + `<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6 text-[12.5px]">${[['Aloqa qilingan', t.contacted, t.leads, 'blue'], ['Jarayonda', t.in_progress, t.leads, 'amber'], ['Sifatsiz', t.junk, t.leads, 'rose'], ['Deal ochilgan', t.deals, t.leads, 'violet']].map(([l, n, of, c]) => `<div class="bg-surface rounded-2xl p-3.5 flex items-center justify-between gap-3"><div><div class="text-muted">${l}</div><div class="text-lg font-bold tabular-nums">${num(n)}</div></div><div class="text-right font-semibold tabular-nums" style="color:rgb(var(--c-${c}))">${pct(div(n, of))}</div></div>`).join('')}</div>`;
+  const usd = v => adMoney(v, false), pipe = (d.forecast || []).reduce((a, r) => a + (+r.prob || 0), 0);
+  const unit = (l, v, dl, line, c) => `<div class="rounded-2xl bg-surface2/60 p-3.5 flex flex-col justify-between min-h-[112px]"><div class="flex items-center justify-between gap-2"><span class="text-[11.5px] text-muted font-medium">${l}</span><span class="w-2 h-2 rounded-full" style="background:rgb(var(--c-${c}))"></span></div><div class="num-xl text-[22px] font-bold tabular-nums whitespace-nowrap">${v}</div><div class="h-7">${line}</div><div class="text-[11px] leading-tight">${dl}</div></div>`;
+  const units = `<div class="${BOX} xl:col-span-6 md:col-span-6"><div class="flex items-center justify-between mb-3"><h3 class="font-semibold text-[15px]">Birlik iqtisodiyoti</h3><span class="text-[11px] text-muted">Target · oldingi ${pr.days} kunga nisbatan</span></div><div class="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+    ${unit('Lid narxi (CPL)', usd(div(spend, T.leads)), delta(div(spend, T.leads), div(pSpend, pT.leads), true, usd), spark(rolling(days, spendD, tLeadD), 'blue'), 'blue')}
+    ${unit('Sifatli lid narxi', usd(div(spend, T.qual)), delta(div(spend, T.qual), div(pSpend, pT.qual), true, usd), spark(rolling(days, spendD, tQualD), 'teal'), 'teal')}
+    ${unit('Mijoz narxi (CAC)', usd(div(spend, tSales.length)), delta(div(spend, tSales.length), div(pSpend, pTSales.length), true, usd), spark(rolling(days, spendD, tSaleD, 14), 'violet'), 'violet')}
+    ${unit('ROMI', pct(romi), `<span class="text-muted">${months > 1 ? `${months} oy o'qisa <b class="text-fg">${pct(romiLtv)}</b>` : "1-oy tushumi bo'yicha"}</span>`, '', romi >= 0 ? 'green' : 'rose')}
+  </div></div>`;
+  return `<div class="grid grid-cols-1 md:grid-cols-6 xl:grid-cols-12 md:grid-flow-row-dense gap-3 mb-6">
+    ${heroSales(sales, sold, rev, pSales, R, days, pipe)}
+    ${funnelFlow(t, sold, R)}
+    ${planRings(t, sold, spend, R)}
+    ${leadBars(days)}
+    ${budgetGauge(spend, pSpend, R, days)}
+    ${units}
+    ${channelDonut(sales, sold)}
+    ${managerBoard(sales)}
+  </div>` + forecastCard() + channelsCard(R);
 }
-// Lead → sifatli → filialga keldi → sotuv, each against the plan for these days, with the step conversions between.
-function funnelPlan(t, sold, R) {
+const BOX = 'bg-surface rounded-3xl p-5 border border-line/50';
+const svgArc = (r, frac, color, w, track = true) => { const c = 2 * Math.PI * r, f = Math.max(0, Math.min(1, frac || 0)); return `${track ? `<circle r="${r}" fill="none" stroke="rgb(var(--c-${color}) / .14)" stroke-width="${w}"/>` : ''}<circle r="${r}" fill="none" stroke="rgb(var(--c-${color}))" stroke-width="${w}" stroke-linecap="round" stroke-dasharray="${(c * f).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90)"/>`; };
+
+// Hero: sales so far against the plan's pace, day by day.
+function heroSales(sales, sold, rev, pSales, R, days, pipe) {
+  const perDay = {}; for (const p of sales) perDay[p.mday] = (perDay[p.mday] || 0) + 1;
+  const planDay = x => { const p = S.data.plans.find(m => m.month === x.slice(0, 7) + '-01'); if (!p || !+p.sales) return 0; return planNeed(p).sales / new Date(+x.slice(0, 4), +x.slice(5, 7), 0).getDate(); };
+  let a = 0, b = 0; const fact = days.map(x => (a += perDay[x] || 0)), plan = days.map(x => (b += planDay(x)));
+  const W = 520, H = 130, mx = Math.max(1, ...fact, ...plan), X = i => days.length > 1 ? i / (days.length - 1) * W : 0, Y = v => H - 6 - v / mx * (H - 16);
+  const line = arr => arr.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ');
+  const chart = `<svg viewBox="0 0 ${W} ${H}" class="w-full h-[130px]" preserveAspectRatio="none"><defs><linearGradient id="heroFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".45"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>
+    ${[0.25, 0.5, 0.75].map(f => `<line x1="0" x2="${W}" y1="${(H * f).toFixed(0)}" y2="${(H * f).toFixed(0)}" stroke="#fff" stroke-opacity=".12" stroke-dasharray="2 4"/>`).join('')}
+    ${b ? `<polyline points="${line(plan)}" fill="none" stroke="#fff" stroke-opacity=".75" stroke-width="1.6" stroke-dasharray="5 5"/>` : ''}
+    <polygon points="0,${H} ${line(fact)} ${W},${H}" fill="url(#heroFill)"/><polyline points="${line(fact)}" fill="none" stroke="#fff" stroke-width="2.6" stroke-linejoin="round"/>
+    <circle cx="${X(days.length - 1)}" cy="${Y(a)}" r="5" fill="#fff"/><circle cx="${X(days.length - 1)}" cy="${Y(a)}" r="10" fill="#fff" fill-opacity=".25"/></svg>`;
+  const ch = div(sold - pSales.length, pSales.length), r = R.sales ? div(sold, R.sales) : null;
+  const mini = (l, v) => `<div class="rounded-2xl bg-white/15 backdrop-blur px-3 py-2.5"><div class="text-[11px] opacity-80">${l}</div><div class="text-[16px] font-bold tabular-nums whitespace-nowrap">${v}</div></div>`;
+  return `<div class="xl:col-span-5 md:col-span-6 rounded-3xl p-5 text-white relative overflow-hidden" style="background:linear-gradient(135deg, rgb(var(--accent)) 0%, rgb(var(--c-violet)) 100%)">
+    <div class="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-white/10"></div><div class="absolute right-10 top-24 w-24 h-24 rounded-full bg-white/5"></div>
+    <div class="relative flex items-start justify-between gap-3"><div><div class="text-[12.5px] opacity-85 font-medium">Sotuvlar · ${fmtDay(S.from)} — ${fmtDay(S.to)}</div><div class="flex items-baseline gap-3 mt-1"><span class="num-xl text-[52px] font-bold leading-none tabular-nums">${num(sold)}</span>${ch != null ? `<span class="text-[12px] font-semibold px-2 py-0.5 rounded-full bg-white/20 tabular-nums">${ch >= 0 ? '↑' : '↓'} ${Math.abs(ch * 100).toFixed(1)}%</span>` : ''}</div><div class="text-[12px] opacity-80 mt-1">${R.sales ? `plan ${num(R.sales)} · <b>${pct(r)}</b> bajarildi` : 'plan kiritilmagan'} · oldin ${num(pSales.length)}</div></div>
+    <div class="text-right text-[11px] opacity-85 leading-5"><div><span class="inline-block w-4 border-t-2 border-white align-middle mr-1"></span>fakt</div>${b ? `<div><span class="inline-block w-4 border-t-2 border-dashed border-white/80 align-middle mr-1"></span>plan sur'ati</div>` : ''}</div></div>
+    <div class="relative mt-2 -mx-1">${chart}</div>
+    <div class="relative grid grid-cols-3 gap-2 mt-2">${mini('Tushum (1-oy)', somMoney(rev))}${mini("O'rtacha chek", somMoney(div(rev, sold)))}${mini('Ochiq deallardan', pipe ? '~' + num(pipe) + ' ta' : '—')}</div></div>`;
+}
+// Funnel as one flowing band that narrows stage by stage.
+function funnelFlow(t, sold, R) {
   const p = R.p, cohort = t.won;
   const st = [['Lid', t.leads, R.leads, 'blue'], ['Sifatli lid', t.qual, R.qual, 'teal'], ['Filialga keldi', t.came_to_branch, R.came, 'violet'], ['Sotuv', sold, R.sales, 'green']];
   const conv = [[div(t.qual, t.leads), p && +p.lead_qual], [div(t.came_to_branch, t.qual), p && +p.qual_came], [div(cohort, t.came_to_branch), p && +p.came_sale]];
   const tone = r => r == null ? 'muted' : r >= 0.9 ? 'success' : r >= 0.7 ? 'warn' : 'danger';
-  const box = ([l, v, plan, c], i) => { const r = plan ? div(v, plan) : null;
-    return `<div class="flex-1 min-w-[150px] rounded-2xl bg-surface2/70 p-4"><div class="flex items-center justify-between gap-2"><span class="text-[12.5px] text-muted font-medium">${l}</span>${r != null ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full tabular-nums" style="color:rgb(var(--${tone(r)}));background:rgb(var(--${tone(r)}) / .12)">${Math.round(r * 100)}%</span>` : ''}</div>
-      <div class="mt-1.5 flex items-baseline gap-2"><span class="num-xl text-[34px] font-bold tabular-nums leading-none">${num(v)}</span>${plan ? `<span class="text-[12px] text-muted tabular-nums">plan ${num(plan)}</span>` : ''}</div>
-      <div class="mt-3 h-1.5 rounded-full bg-line/70 overflow-hidden"><div class="h-full rounded-full" style="width:${Math.min((r ?? 0) * 100, 100).toFixed(1)}%;background:rgb(var(--c-${c}))"></div></div>
-      ${i === 3 && sold !== cohort ? `<div class="text-[10.5px] text-muted mt-2">${num(cohort)} tasi shu davr leadlaridan</div>` : ''}</div>`; };
-  const arrow = ([v, plan]) => { const r = plan ? div(v, plan) : null; return `<div class="flex lg:flex-col items-center justify-center gap-1 px-1 text-center"><i class="ph-bold ph-arrow-right text-muted hidden lg:block"></i><i class="ph-bold ph-arrow-down text-muted lg:hidden"></i><span class="text-[14px] font-bold tabular-nums" style="color:rgb(var(--${tone(r)}))">${pct(v)}</span>${plan ? `<span class="text-[10.5px] text-muted">plan ${pct(plan)}</span>` : ''}</div>`; };
-  const head = `<div class="flex flex-wrap items-center justify-between gap-2 mb-4"><h3 class="font-semibold text-[15px]">Voronka va plan</h3><span class="text-[11.5px] text-muted">${R.has ? `Tanlangan ${rangeDays().length} kunlik plan${R.missing.length ? ` · ${R.missing.map(monthName).join(', ')} uchun plan yo'q` : ''}` : `Plan kiritilmagan — <button onclick="S.sec.overview='set';render()" class="text-accent font-semibold">kiritish</button>`}</span></div>`;
-  return `<div class="glow rounded-3xl p-5 mb-3 border border-line/60">${head}<div class="flex flex-col lg:flex-row gap-2 lg:gap-1 items-stretch">${st.map((x, i) => box(x, i) + (i < 3 ? arrow(conv[i]) : '')).join('')}</div>${planForecastLine()}</div>`;
+  const W = 600, H = 150, hs = st.map(([, v]) => Math.max(Math.sqrt(div(v, t.leads) || 0) * H, 12)), xs = [0, W / 3, 2 * W / 3, W];
+  const top = hs.map(h => (H - h) / 2), bot = hs.map(h => (H + h) / 2);
+  let path = `M0,${top[0]}`; for (let i = 1; i < 4; i++) { const mx = (xs[i - 1] + xs[i]) / 2; path += ` C${mx},${top[i - 1]} ${mx},${top[i]} ${xs[i]},${top[i]}`; }
+  path += ` L${W},${bot[3]}`; for (let i = 3; i > 0; i--) { const mx = (xs[i - 1] + xs[i]) / 2; path += ` C${mx},${bot[i]} ${mx},${bot[i - 1]} ${xs[i - 1]},${bot[i - 1]}`; } path += ' Z';
+  const band = `<svg viewBox="0 0 ${W} ${H}" class="w-full h-[150px]" preserveAspectRatio="none"><defs><linearGradient id="fflow" x1="0" x2="1" y1="0" y2="0"><stop offset="0" stop-color="rgb(var(--c-blue))"/><stop offset=".4" stop-color="rgb(var(--c-teal))"/><stop offset=".7" stop-color="rgb(var(--c-violet))"/><stop offset="1" stop-color="rgb(var(--c-green))"/></linearGradient></defs><path d="${path}" fill="url(#fflow)" fill-opacity=".9"/>${[1, 2].map(i => `<line x1="${xs[i]}" x2="${xs[i]}" y1="0" y2="${H}" stroke="rgb(var(--surface))" stroke-width="2" stroke-opacity=".7"/>`).join('')}</svg>`;
+  const head = st.map(([l, v, plan, c]) => { const r = plan ? div(v, plan) : null; return `<div class="min-w-0"><div class="flex items-center gap-1.5 text-[11.5px] text-muted font-medium"><span class="w-2 h-2 rounded-full" style="background:rgb(var(--c-${c}))"></span>${l}</div><div class="num-xl text-[26px] font-bold tabular-nums leading-tight">${num(v)}</div><div class="text-[11px] tabular-nums ${plan ? '' : 'text-muted'}">${plan ? `<span style="color:rgb(var(--${tone(r)}))" class="font-semibold">${Math.round(r * 100)}%</span> <span class="text-muted">/ ${num(plan)}</span>` : 'plan yo\'q'}</div></div>`; }).join('');
+  const convRow = conv.map(([v, plan]) => { const r = plan ? div(v, plan) : null; return `<div class="text-center"><span class="inline-flex items-center gap-1 text-[12px] font-bold px-2.5 py-1 rounded-full tabular-nums" style="color:rgb(var(--${tone(r)}));background:rgb(var(--${tone(r)}) / .12)"><i class="ph-bold ph-arrow-right text-[10px]"></i>${pct(v)}</span>${plan ? `<div class="text-[10.5px] text-muted mt-0.5">plan ${pct(plan)}</div>` : ''}</div>`; }).join('');
+  return `<div class="${BOX} xl:col-span-7 md:col-span-6"><div class="flex flex-wrap items-center justify-between gap-2 mb-3"><h3 class="font-semibold text-[15px]">Voronka va plan</h3><span class="text-[11px] text-muted">${R.has ? `${rangeDays().length} kunlik plan${R.missing.length ? ` · ${R.missing.map(monthName).join(', ')}da plan yo'q` : ''}` : `<button onclick="S.sec.overview='set';render()" class="text-accent font-semibold">Plan kiritish</button>`}</span></div>
+    <div class="grid grid-cols-4 gap-3">${head}</div><div class="my-3">${band}</div><div class="grid grid-cols-[1fr_1fr_1fr] gap-3 px-[8%]">${convRow}</div>${sold !== cohort ? `<div class="text-[10.5px] text-muted mt-2">Konversiyalar shu davr leadlari ichida: ${num(sold)} sotuvdan ${num(cohort)} tasi shu leadlardan.</div>` : ''}${planForecastLine()}</div>`;
+}
+// Plan completion as concentric rings.
+function planRings(t, sold, spend, R) {
+  const items = [['Lid', t.leads, R.leads, 'blue'], ['Sifatli', t.qual, R.qual, 'teal'], ['Keldi', t.came_to_branch, R.came, 'violet'], ['Sotuv', sold, R.sales, 'green']];
+  if (!R.has) return `<div class="${BOX} xl:col-span-3 md:col-span-3 flex flex-col items-center justify-center text-center gap-3"><i class="ph-bold ph-target text-4xl text-muted"></i><div class="text-sm font-semibold">Plan kiritilmagan</div><button onclick="S.sec.overview='set';render()" class="h-9 px-4 rounded-xl bg-fg text-surface text-sm font-semibold">Kiritish</button></div>`;
+  const rings = items.map(([, v, plan, c], i) => svgArc(60 - i * 13, div(v, plan), c, 9)).join('');
+  const avg = div(items.reduce((a, [, v, plan]) => a + Math.min(div(v, plan) || 0, 1.5), 0), 4);
+  return `<div class="${BOX} xl:col-span-3 md:col-span-3"><h3 class="font-semibold text-[15px] mb-3">Plan bajarilishi</h3><div class="flex items-center gap-4"><div class="relative shrink-0"><svg viewBox="-70 -70 140 140" class="w-[132px] h-[132px]">${rings}</svg><div class="absolute inset-0 flex flex-col items-center justify-center"><span class="text-[18px] font-bold tabular-nums">${Math.round(avg * 100)}%</span><span class="text-[10px] text-muted">o'rtacha</span></div></div>
+    <div class="space-y-2 min-w-0 flex-1">${items.map(([l, v, plan, c]) => `<div class="flex items-center justify-between gap-2 text-[12.5px]"><span class="flex items-center gap-1.5 text-muted"><span class="w-2 h-2 rounded-full" style="background:rgb(var(--c-${c}))"></span>${l}</span><b class="tabular-nums">${Math.round((div(v, plan) || 0) * 100)}%</b></div>`).join('')}</div></div></div>`;
+}
+// Leads per day (all channels in the filter), qualified ones as the darker part; the best day is marked.
+function leadBars(days) {
+  const rows = bySource(S.data.daily), L = {}, Q = {};
+  for (const r of rows) { L[r.day] = (L[r.day] || 0) + +r.leads; Q[r.day] = (Q[r.day] || 0) + +r.qual; }
+  const mx = Math.max(1, ...days.map(x => L[x] || 0)), best = days.reduce((a, x) => (L[x] || 0) > (L[a] || 0) ? x : a, days[0]);
+  const n = days.length, W = 600, H = 150, bw = W / n * 0.62, gap = W / n;
+  const bars = days.map((x, i) => { const h = (L[x] || 0) / mx * (H - 26), hq = (Q[x] || 0) / mx * (H - 26), cx = i * gap + (gap - bw) / 2, isB = x === best;
+    return `<rect x="${cx.toFixed(1)}" y="${(H - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="${Math.min(bw / 2, 5).toFixed(1)}" fill="rgb(var(--c-blue) / ${isB ? 1 : .28})"/><rect x="${cx.toFixed(1)}" y="${(H - hq).toFixed(1)}" width="${bw.toFixed(1)}" height="${hq.toFixed(1)}" rx="${Math.min(bw / 2, 5).toFixed(1)}" fill="rgb(var(--c-teal))"/>${isB ? `<text x="${(cx + bw / 2).toFixed(1)}" y="${(H - h - 8).toFixed(1)}" text-anchor="middle" font-size="12" font-weight="700" fill="rgb(var(--fg))">${num(L[x])}</text>` : ''}`; }).join('');
+  const tot = days.reduce((a, x) => a + (L[x] || 0), 0), tq = days.reduce((a, x) => a + (Q[x] || 0), 0);
+  return `<div class="${BOX} xl:col-span-6 md:col-span-6"><div class="flex flex-wrap items-start justify-between gap-3 mb-2"><div><h3 class="font-semibold text-[15px]">Kunlik leadlar</h3><p class="text-[11px] text-muted">kuniga o'rtacha ${num(tot / n)} · eng ko'p ${fmtDay(best)} (${num(L[best])})</p></div><div class="flex gap-3 text-[11px] text-muted"><span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded" style="background:rgb(var(--c-blue) / .5)"></span>lead ${num(tot)}</span><span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded" style="background:rgb(var(--c-teal))"></span>sifatli ${num(tq)}</span></div></div>
+    <svg viewBox="0 0 ${W} ${H}" class="w-full h-[150px]" preserveAspectRatio="none">${bars}</svg><div class="flex justify-between text-[10.5px] text-muted mt-1"><span>${fmtDay(days[0])}</span><span>${fmtDay(days[Math.floor(n / 2)])}</span><span>${fmtDay(days[n - 1])}</span></div></div>`;
+}
+// Ad budget as a half gauge, with a tick where spending should be by today.
+function budgetGauge(spend, pSpend, R, days) {
+  const goal = R.budget || pSpend, f = div(spend, goal) || 0, r = 70, c = Math.PI * r;
+  const today = iso(new Date()), passed = days.filter(x => x <= today).length / days.length, a = Math.PI * (1 - Math.min(passed, 1));
+  const tx = Math.cos(a) * r, ty = -Math.sin(a) * r;
+  return `<div class="${BOX} xl:col-span-3 md:col-span-3"><h3 class="font-semibold text-[15px]">Reklama byudjeti</h3><p class="text-[11px] text-muted mb-2">${R.budget ? 'plan bo\'yicha' : 'oldingi davrga nisbatan'}</p>
+    <div class="relative flex justify-center"><svg viewBox="-85 -80 170 92" class="w-full max-w-[220px]"><path d="M-${r},0 A${r},${r} 0 0 1 ${r},0" fill="none" stroke="rgb(var(--c-amber) / .15)" stroke-width="14" stroke-linecap="round"/><path d="M-${r},0 A${r},${r} 0 0 1 ${r},0" fill="none" stroke="rgb(var(--c-amber))" stroke-width="14" stroke-linecap="round" stroke-dasharray="${(c * Math.min(f, 1)).toFixed(1)} ${c.toFixed(1)}"/>
+      <line x1="${(tx * 0.78).toFixed(1)}" y1="${(ty * 0.78).toFixed(1)}" x2="${(tx * 1.2).toFixed(1)}" y2="${(ty * 1.2).toFixed(1)}" stroke="rgb(var(--fg))" stroke-width="2"/></svg>
+      <div class="absolute bottom-0 text-center"><div class="num-xl text-[24px] font-bold tabular-nums leading-none">${adMoney(spend, false)}</div><div class="text-[11px] text-muted mt-1">${pct(f)} · ${goal ? adMoney(goal, false) : '—'} dan</div></div></div>
+    <div class="text-[10.5px] text-muted text-center mt-2">Chiziq — shu kungacha sarflanishi kerak bo'lgan joy</div></div>`;
+}
+// Where the sales came from, as a donut.
+function channelDonut(sales, sold) {
+  const by = Object.entries(countBy(sales, p => channelOf(p.source))).sort((a, b) => b[1].n - a[1].n), C = ['blue', 'teal', 'violet', 'amber', 'green', 'rose'];
+  const top = by.slice(0, 5), rest = by.slice(5).reduce((a, [, o]) => a + o.n, 0); if (rest) top.push(['Boshqalar', { n: rest }]);
+  let acc = 0; const r = 52, c = 2 * Math.PI * r;
+  const segs = top.map(([, o], i) => { const f = o.n / (sold || 1), seg = `<circle r="${r}" fill="none" stroke="rgb(var(--c-${C[i % C.length]}))" stroke-width="16" stroke-dasharray="${Math.max(c * f - 2, 0).toFixed(1)} ${c.toFixed(1)}" stroke-dashoffset="${(-c * acc).toFixed(1)}" transform="rotate(-90)"/>`; acc += f; return seg; }).join('');
+  return `<div class="${BOX} xl:col-span-3 md:col-span-3"><h3 class="font-semibold text-[15px] mb-3">Sotuv qayerdan</h3><div class="flex items-center gap-4"><div class="relative shrink-0"><svg viewBox="-70 -70 140 140" class="w-[120px] h-[120px]"><circle r="${r}" fill="none" stroke="rgb(var(--surface2))" stroke-width="16"/>${segs}</svg><div class="absolute inset-0 flex flex-col items-center justify-center"><span class="text-[20px] font-bold tabular-nums">${num(sold)}</span><span class="text-[10px] text-muted">sotuv</span></div></div>
+    <div class="space-y-1.5 min-w-0 flex-1">${top.map(([k, o], i) => `<div class="flex items-center justify-between gap-2 text-[12px]"><span class="flex items-center gap-1.5 min-w-0"><span class="w-2 h-2 rounded-full shrink-0" style="background:rgb(var(--c-${C[i % C.length]}))"></span><span class="truncate">${esc(k)}</span></span><b class="tabular-nums">${pct(o.n / (sold || 1))}</b></div>`).join('')}</div></div></div>`;
+}
+// Managers who closed the most sales in the period.
+function managerBoard(sales) {
+  const by = Object.entries(countBy(sales.filter(p => !isHiddenUser(p.manager)), p => p.manager || '—')).sort((a, b) => b[1].n - a[1].n).slice(0, 5), mx = by[0]?.[1].n || 1, C = ['amber', 'blue', 'teal', 'violet', 'green'];
+  const ini = n => String(n).split('|')[0].trim().split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase();
+  return `<div class="${BOX} xl:col-span-3 md:col-span-3"><h3 class="font-semibold text-[15px] mb-3">Eng ko'p sotgan menejerlar</h3><div class="space-y-2.5">${by.map(([k, o], i) => `<div class="flex items-center gap-2.5"><div class="w-8 h-8 rounded-full shrink-0 flex items-center justify-center text-[11px] font-bold text-white" style="background:rgb(var(--c-${C[i]}))">${esc(ini(k))}</div><div class="min-w-0 flex-1"><div class="flex justify-between gap-2 text-[12.5px]"><span class="truncate font-medium">${esc(String(k).split('|')[0].trim())}</span><b class="tabular-nums">${num(o.n)}</b></div><div class="h-1.5 rounded-full bg-surface2 mt-1"><div class="h-1.5 rounded-full" style="width:${(o.n / mx * 100).toFixed(0)}%;background:rgb(var(--c-${C[i]}))"></div></div></div></div>`).join('') || empty("Sotuv yo'q")}</div></div>`;
 }
 function planForecastLine() {
   const today = iso(new Date()), mKey = today.slice(0, 7) + '-01', cur = S.data.plans.find(x => x.month === mKey);
