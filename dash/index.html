@@ -264,8 +264,8 @@ async function load() {
   S.data = { funnel, courses, cohort, creatives, naming, pains, taxonomy, objections, managers, briefs, cfg, sync, outcomes, sales, users, dealStages, hours, codes, daily, operators, statusOut, cycle, money, lostReasons, cohortSum, cohortSrc, spend, adDaily, adLeads, adCatalog, wonDaily, salesMonth, calls, speed, dm, dmLive, queue, brDaily, brSpend, brCamp, plans, adGeo, economy, tasks, staff, capi, crmMap, crmStatuses };
   const srcName = Object.fromEntries(crmStatuses.filter(r => r.entity === 'SOURCE').map(r => [r.status_id, r.name]));
   const pr = prevRange(), pday = x => x.gte('day', pr.from).lte('day', pr.to);
-  const [prevDaily, prevSpend, forecast] = await Promise.all([q('v_daily_outcomes', pday), q('v_spend_daily', pday), q('v_deal_forecast')]);
-  Object.assign(S.data, { prevDaily, prevSpend, forecast });
+  const [prevDaily, prevSpend, forecast, prevBr] = await Promise.all([q('v_daily_outcomes', pday), q('v_spend_daily', pday), q('v_deal_forecast'), q('v_branch_daily', pday)]);
+  Object.assign(S.data, { prevDaily, prevSpend, forecast, prevBr });
   S.data.purchases = await purchasesP;
   S.data.me = ADMIN ? (await q('admins'))[0] : null;
   S.data.chanMap = Object.fromEntries(crmMap.filter(r => r.kind === 'source').map(r => [srcName[r.code] || r.code, r.value]));
@@ -320,7 +320,7 @@ function shell(body) {
     </main>
   </div>`;
 }
-const SOURCE_PAGES = ['overview', 'speed'];
+const SOURCE_PAGES = ['speed'];
 // Screens whose sale counts depend on the date rule; all of them read the same list (salesList), so a number is the same everywhere.
 const DATE_PAGES = ['overview', 'funnel', 'branches', 'daily', 'purchases', 'creatives', 'report'];
 const dateBar = () => `<div class="flex flex-wrap items-center gap-3 mb-5 text-[12px] text-muted">${dateToggle()}<span>${saleMode() ? "Sotuv — shu kunlarda to'lov qilganlar, lead qachon kelganidan qat'i nazar." : "Sotuv — faqat shu kunlarda kelgan leadlardan chiqqanlar."} Bu tanlov hamma sahifaga birdek ta'sir qiladi.</span></div>`;
@@ -375,7 +375,7 @@ function overview() {
   const rows = bySource(S.data.daily);
   const t = groupSum(rows, () => 'all')[0];
   if (!t) return card(empty("Tanlangan davrda lead yo'q"));
-  return sections('overview', [['kpi', "Ko'rsatkichlar", () => overviewKpi(t)], ['why', 'Reja: sabab va harakat', planWhy], ['set', 'Rejani kiritish', planEditor]]);
+  return sections('overview', [['kpi', "Ko'rsatkichlar", () => overviewKpi()], ['why', 'Reja: sabab va harakat', planWhy], ['set', 'Rejani kiritish', planEditor]]);
 }
 // ---------- Overview: funnel against plan, money with trend, sale forecast, configurable channels ----------
 function prevRange() { const days = Math.round((new Date(S.to) - new Date(S.from)) / 864e5) + 1, to = addDays(new Date(S.from + 'T00:00'), -1); return { from: iso(addDays(to, -(days - 1))), to: iso(to), days }; }
@@ -396,39 +396,115 @@ function delta(cur, prev, lowerBetter, fmt) {
   return `<span class="text-[11.5px] font-semibold tabular-nums" style="color:rgb(var(--${Math.abs(d) < 0.005 ? 'muted' : good ? 'success' : 'danger'}))">${d >= 0 ? '↑' : '↓'} ${Math.abs(d * 100).toFixed(1)}%</span> <span class="text-[11px] text-muted">oldin ${fmt(prev)}</span>`;
 }
 // Overview as a bento board: every block shows its number with the chart that suits it.
-function overviewKpi(t) {
+// ---------- Overview for analysis: filters → conclusions → KPIs vs plan → step funnel with losses → comparisons → channels → rankings ----------
+// One lead base for every block: v_branch_daily (same totals as the daily view) filtered by channel and branch.
+const ovRows = (rows = S.data.brDaily) => (rows || []).filter(r => (!S.source || channelOf(r.source) === S.source) && (!S.brF || r.branch === S.brF));
+const funnelOf = rows => rows.reduce((t, r) => { for (const k of ['leads', 'contacted', 'qual', 'came', 'won']) t[k] += +r[k] || 0; return t; }, { leads: 0, contacted: 0, qual: 0, came: 0, won: 0 });
+const ovSales = list => list.filter(p => !S.brF || p.branch === S.brF);
+function setOvFilter(k, v) { if (k === 'src') S.source = v; else S.brF = v; render(); }
+function ovFilters() {
+  const rows = (S.data.brDaily || []).filter(r => !S.brF || r.branch === S.brF), byC = {}; for (const r of rows) byC[channelOf(r.source)] = (byC[channelOf(r.source)] || 0) + +r.leads;
+  const brs = {}; for (const r of (S.data.brDaily || []).filter(r => !S.source || channelOf(r.source) === S.source)) if (r.branch && !/^NOMA/.test(r.branch)) brs[r.branch] = (brs[r.branch] || 0) + +r.leads;
+  const pill = (c, t, n) => `<button data-c="${esc(c)}" onclick="setOvFilter('src', this.dataset.c)" class="shrink-0 h-8 px-3 rounded-full text-xs font-semibold border ${(S.source || '') === c ? 'bg-fg text-surface border-fg' : 'bg-surface border-line text-muted hover:text-fg'}">${esc(t)} <span class="tabular-nums opacity-70">${num(n)}</span></button>`;
+  const all = Object.values(byC).reduce((a, b) => a + b, 0);
+  return `<div class="bg-surface rounded-3xl p-3.5 mb-3 border border-line/50 flex flex-wrap items-center gap-3"><span class="text-[11px] font-semibold uppercase tracking-wider text-muted px-1"><i class="ph-bold ph-funnel-simple"></i> Filtr</span>
+    <div class="flex gap-1.5 overflow-x-auto max-w-full">${pill('', 'Barcha kanallar', all)}${Object.entries(byC).sort((a, b) => b[1] - a[1]).map(([c, n]) => pill(c, c, n)).join('')}</div>
+    <select onchange="setOvFilter('br', this.value)" class="h-8 px-2 rounded-full text-xs font-semibold border ${S.brF ? 'border-accent text-accent' : 'border-line'} bg-surface"><option value="">Barcha filiallar</option>${Object.entries(brs).sort((a, b) => b[1] - a[1]).map(([b, n]) => `<option value="${esc(b)}" ${b === S.brF ? 'selected' : ''}>${esc(b)} (${num(n)})</option>`).join('')}</select>
+    ${S.source || S.brF ? `<button onclick="S.source='';S.brF='';render()" class="h-8 px-3 rounded-full text-xs font-semibold text-danger"><i class="ph-bold ph-x"></i> Tozalash</button>` : ''}</div>`;
+}
+function overviewKpi() {
   const d = S.data, fx = +d.cfg?.fx_rate || 0, R = planRange(), days = rangeDays(), pr = prevRange();
-  const spend = d.spend.reduce((a, r) => a + +r.spend, 0), pSpend = (d.prevSpend || []).reduce((a, r) => a + +r.spend, 0);
-  const tgt = rows => groupSum(rows.filter(r => r.source === 'Target'), () => 't')[0] || { leads: 0, qual: 0, won: 0 };
-  const T = tgt(d.daily), pT = tgt(d.prevDaily || []);
-  const sales = salesList(), sold = sales.length, rev = sales.reduce((a, p) => a + (+p.amount || 0), 0);
+  const F = funnelOf(ovRows()), PF = funnelOf(ovRows(d.prevBr));
+  if (!F.leads) return ovFilters() + card(empty("Bu filtr bo'yicha lead yo'q"));
+  const brSp = rows => rows.filter(r => !S.brF || r.branch === S.brF);
+  const targetOn = !S.source || S.source === 'Target';
+  const spend = targetOn ? (S.brF ? brSp(d.brSpend).reduce((a, r) => a + +r.spend, 0) : d.spend.reduce((a, r) => a + +r.spend, 0)) : 0;
+  const pSpend = targetOn && !S.brF ? (d.prevSpend || []).reduce((a, r) => a + +r.spend, 0) : null;
   const inRange = (p, f, to) => { const k = saleMode() ? p.day : p.lead_day; return k && k >= f && k <= to; };
-  const pSales = (d.purchases || []).filter(p => inRange(p, pr.from, pr.to) && (!S.source || channelOf(p.source) === S.source));
-  const tSales = salesList(true).filter(p => channelOf(p.source) === 'Target'), pTSales = (d.purchases || []).filter(p => inRange(p, pr.from, pr.to) && channelOf(p.source) === 'Target');
-  const tRev = tSales.reduce((a, p) => a + (+p.amount || 0), 0), months = +d.cfg?.avg_months || 0;
-  const by = (rows, f) => rows.reduce((m, r) => (m[r.day] = (m[r.day] || 0) + f(r), m), {});
-  const spendD = by(d.spend, r => +r.spend), tLeadD = by(d.daily.filter(r => r.source === 'Target'), r => +r.leads), tQualD = by(d.daily.filter(r => r.source === 'Target'), r => +r.qual);
-  const tSaleD = tSales.reduce((m, p) => (m[p.mday] = (m[p.mday] || 0) + 1, m), {});
-  const romi = fx && spend ? div(tRev - spend * fx, spend * fx) : null, romiLtv = fx && spend && months > 1 ? div(tRev * months - spend * fx, spend * fx) : null;
-  const usd = v => adMoney(v, false), pipe = (d.forecast || []).reduce((a, r) => a + (+r.prob || 0), 0);
-  const unit = (l, v, dl, line, c) => `<div class="rounded-2xl bg-surface2/60 p-3.5 flex flex-col justify-between min-h-[112px]"><div class="flex items-center justify-between gap-2"><span class="text-[11.5px] text-muted font-medium">${l}</span><span class="w-2 h-2 rounded-full" style="background:rgb(var(--c-${c}))"></span></div><div class="num-xl text-[22px] font-bold tabular-nums whitespace-nowrap">${v}</div><div class="h-7">${line}</div><div class="text-[11px] leading-tight">${dl}</div></div>`;
-  const units = `<div class="${BOX} xl:col-span-6 md:col-span-6"><div class="flex items-center justify-between mb-3"><h3 class="font-semibold text-[15px]">Birlik iqtisodiyoti</h3><span class="text-[11px] text-muted">Target · oldingi ${pr.days} kunga nisbatan</span></div><div class="grid grid-cols-2 gap-2.5">
-    ${unit('Lid narxi (CPL)', usd(div(spend, T.leads)), delta(div(spend, T.leads), div(pSpend, pT.leads), true, usd), spark(rolling(days, spendD, tLeadD), 'blue'), 'blue')}
-    ${unit('Sifatli lid narxi', usd(div(spend, T.qual)), delta(div(spend, T.qual), div(pSpend, pT.qual), true, usd), spark(rolling(days, spendD, tQualD), 'teal'), 'teal')}
-    ${unit('Mijoz narxi (CAC)', usd(div(spend, tSales.length)), delta(div(spend, tSales.length), div(pSpend, pTSales.length), true, usd), spark(rolling(days, spendD, tSaleD, 14), 'violet'), 'violet')}
-    ${unit('ROMI', pct(romi), `<span class="text-muted">${months > 1 ? `${months} oy o'qisa <b class="text-fg">${pct(romiLtv)}</b>` : "1-oy tushumi bo'yicha"}</span>`, '', romi >= 0 ? 'green' : 'rose')}
-  </div></div>`;
-  const ins = insights({ t, T, pT, sold, spend, pSpend, R, tSales, pTSales });
-  return ins + `<div class="grid grid-cols-1 md:grid-cols-6 xl:grid-cols-12 md:grid-flow-row-dense gap-3 mb-6">
-    ${heroSales(sales, sold, rev, pSales, R, days, pipe)}
-    ${funnelFlow(t, sold, R)}
-    ${planRings(t, sold, spend, R)}
-    ${leadBars(days)}
-    ${budgetGauge(spend, pSpend, R, days)}
-    ${units}
-    ${channelDonut(sales, sold)}
-    ${managerBoard(sales)}
-  </div>` + forecastCard() + channelsCard(R);
+  const sales = ovSales(salesList()), sold = sales.length, rev = sales.reduce((a, p) => a + (+p.amount || 0), 0);
+  const pSales = ovSales((d.purchases || []).filter(p => inRange(p, pr.from, pr.to) && (!S.source || channelOf(p.source) === S.source)));
+  const tRows = rows => rows.filter(r => r.source === 'Target' && (!S.brF || r.branch === S.brF));
+  const T = funnelOf(tRows(d.brDaily)), PT = funnelOf(tRows(d.prevBr || []));
+  const tSales = ovSales(salesList(true)).filter(p => channelOf(p.source) === 'Target'), pTSales = ovSales((d.purchases || []).filter(p => inRange(p, pr.from, pr.to) && channelOf(p.source) === 'Target'));
+  // Plan for the filtered slice: the channel and branch shares from the plan.
+  const share = R.p ? (S.source ? +(R.p.channels?.[S.source] ?? 0) / 100 : 1) * (S.brF ? +(R.p.branches?.[S.brF] ?? 0) / 100 : 1) : 0;
+  const by = (rows, f, key = 'day') => rows.reduce((m, r) => (m[r[key]] = (m[r[key]] || 0) + f(r), m), {});
+  const spendD = S.brF ? by(brSp(d.brSpend), r => +r.spend) : by(d.spend, r => +r.spend), tQualD = by(tRows(d.brDaily), r => +r.qual);
+  const saleD = by(sales, () => 1, 'mday'), revD = by(sales, p => +p.amount || 0, 'mday'), tSaleD = by(tSales, () => 1, 'mday');
+  const usd = v => adMoney(v, false);
+  const kpi = (l, v, plan, fmt, dl, line, c) => { const r = plan ? div(typeof v === 'number' ? v : 0, plan) : null;
+    return `<div class="${BOX} !p-4 flex flex-col gap-1.5 min-w-0"><div class="flex items-center justify-between gap-2"><span class="text-[12px] text-muted font-medium">${l}</span><span class="w-2 h-2 rounded-full" style="background:rgb(var(--c-${c}))"></span></div>
+      <div class="flex items-end justify-between gap-2"><span class="num-xl text-[26px] font-bold tabular-nums leading-none whitespace-nowrap">${fmt(v)}</span><div class="w-[78px] h-8 shrink-0">${line}</div></div>
+      ${plan ? `<div class="flex items-center gap-2 text-[11px]"><div class="flex-1 h-1.5 rounded-full bg-surface2 overflow-hidden"><div class="h-full rounded-full" style="width:${Math.min(r * 100, 100).toFixed(1)}%;background:rgb(var(--${r >= 0.9 ? 'success' : r >= 0.7 ? 'warn' : 'danger'}))"></div></div><span class="tabular-nums text-muted">${Math.round(r * 100)}% / ${fmt(plan)}</span></div>` : '<div class="text-[11px] text-muted">plan yo\'q</div>'}
+      <div class="text-[11px]">${dl}</div></div>`; };
+  const cq = div(spend, T.qual), pcq = pSpend == null ? null : div(pSpend, PT.qual), cac = div(spend, tSales.length), pcac = pSpend == null ? null : div(pSpend, pTSales.length);
+  const romi = fx && spend ? div(tSales.reduce((a, p) => a + (+p.amount || 0), 0) - spend * fx, spend * fx) : null;
+  const kpis = `<div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 mb-3">
+    ${kpi('Sotuvlar', sold, R.sales * share, num, delta(sold, pSales.length, false, num), spark(days.map(x => saleD[x] || 0), 'green'), 'green')}
+    ${kpi('Tushum (1-oy)', rev, 0, somMoney, delta(rev, pSales.reduce((a, p) => a + (+p.amount || 0), 0), false, somMoney), spark(days.map(x => revD[x] || 0), 'green'), 'teal')}
+    ${kpi('Reklama xarajati', spend, targetOn ? R.budget * (S.brF ? share : 1) : 0, usd, pSpend == null ? '<span class="text-muted">—</span>' : delta(spend, pSpend, false, usd), spark(days.map(x => spendD[x] || 0), 'amber'), 'amber')}
+    ${kpi('Sifatli lid narxi', cq, 0, usd, pcq == null ? '<span class="text-muted">Target</span>' : delta(cq, pcq, true, usd), spark(rolling(days, spendD, tQualD), 'blue'), 'blue')}
+    ${kpi('Mijoz narxi (CAC)', cac, 0, usd, (pcac == null ? '' : delta(cac, pcac, true, usd)) + ` <span class="text-muted">· ROMI ${pct(romi)}</span>`, spark(rolling(days, spendD, tSaleD, 14), 'violet'), 'violet')}
+  </div>`;
+  return ovFilters() + insights({ t: { ...F, came_to_branch: F.came }, T, pT: PT, sold, spend, pSpend: pSpend ?? 0, R, tSales, pTSales }) + kpis
+    + stepFunnel(F, PF, R) + compareCard(F, PF) + channelsCard(R) + `<div class="grid md:grid-cols-3 gap-3 mb-6">${branchRank()}${creativeRank()}${managerBoard(sales).replace(/xl:col-span-3 md:col-span-3/, '')}</div>` + forecastCard();
+}
+// Step-by-step funnel: how many pass, how many drop at each step, and why they drop.
+function stepFunnel(F, PF, R) {
+  const p = R.p, st = [['Lid', F.leads, PF.leads], ["Aloqa qilindi", F.contacted, PF.contacted], ['Sifatli', F.qual, PF.qual], ['Filialga keldi', F.came, PF.came], ['Sotuvga aylandi', F.won, PF.won]];
+  const planConv = [null, null, p && +p.lead_qual, p && +p.qual_came, p && +p.came_sale];
+  const cols = st.map(([l, v, pv], i) => { const h = Math.max(Math.sqrt(div(v, F.leads) || 0) * 100, 3), conv = i ? div(v, st[i - 1][1]) : null, pconv = i ? div(pv, st[i - 1][2]) : null, plan = planConv[i], lost = i ? st[i - 1][1] - v : 0;
+    const tone = plan ? (conv >= plan ? 'success' : conv >= plan * 0.7 ? 'warn' : 'danger') : pconv ? (conv >= pconv ? 'success' : 'danger') : 'muted';
+    return `<div class="flex-1 min-w-[110px]"><div class="text-[12px] text-muted font-medium h-9 leading-tight">${l}</div><div class="num-xl text-[24px] font-bold tabular-nums">${num(v)}</div><div class="text-[10.5px] text-muted">${i ? pct(div(v, F.leads)) + ' liddan' : 'shu davrda kelgan'}</div>
+      <div class="relative h-[150px] mt-2 rounded-xl bg-surface2 overflow-hidden"><div class="absolute bottom-0 inset-x-0 rounded-xl" style="height:${h}%;background:linear-gradient(180deg, rgb(var(--c-blue)), rgb(var(--c-violet)))"></div></div>
+      ${i ? `<div class="mt-2 rounded-xl p-2" style="background:rgb(var(--${tone}) / .08)"><div class="text-[13px] font-bold tabular-nums" style="color:rgb(var(--${tone}))">${pct(conv)} o'tdi</div><div class="text-[10.5px] text-muted leading-tight">${plan ? `plan ${pct(plan)}` : ''}${plan && pconv != null ? ' · ' : ''}${pconv != null ? `oldin ${pct(pconv)}` : ''}</div><div class="text-[11.5px] font-semibold mt-1" style="color:rgb(var(--danger))"><i class="ph-bold ph-arrow-down-right"></i> ${num(lost)} yo'qoldi</div></div>` : '<div class="mt-2 p-2 text-[10.5px] text-muted">boshlanish</div>'}</div>`; }).join('');
+  // Why leads drop: lead statuses that are not qualified (by channel), and lost-deal reasons.
+  const so = (S.data.statusOut || []).filter(r => !S.source || channelOf(r.source) === S.source), stBy = {}; for (const r of so) if (!+r.qual && !+r.won) stBy[r.status_name] = (stBy[r.status_name] || 0) + +r.leads;
+  const lr = {}; for (const r of S.data.lostReasons || []) lr[r.reason || "Sabab yozilmagan"] = (lr[r.reason || "Sabab yozilmagan"] || 0) + +r.deals;
+  const reasonList = (o, color) => { const e = Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, 6), tot = Object.values(o).reduce((a, b) => a + b, 0) || 1, mx = e[0]?.[1] || 1;
+    return e.map(([k, n]) => `<div class="py-1.5"><div class="flex justify-between gap-2 text-[12.5px]"><span class="truncate">${esc(k)}</span><span class="tabular-nums whitespace-nowrap"><b>${num(n)}</b> <span class="text-muted text-[11px]">${pct(n / tot, 0)}</span></span></div><div class="h-1.5 rounded-full bg-surface2 mt-1"><div class="h-1.5 rounded-full" style="width:${(n / mx * 100).toFixed(0)}%;background:rgb(var(--c-${color}))"></div></div></div>`).join('') || empty("Ma'lumot yo'q"); };
+  return `<div class="${BOX} mb-3"><div class="flex flex-wrap items-center justify-between gap-2 mb-3"><div><h3 class="font-semibold text-[15px]">Voronka: qayerda yo'qotyapmiz</h3><p class="text-[11.5px] text-muted">Shu davrda kelgan leadlar yo'li. Rang: yashil — plandan yaxshi, qizil — yomon. «Oldin» — oldingi ${prevRange().days} kun.</p></div>${S.source || S.brF ? `<span class="text-[11.5px] px-2.5 py-1 rounded-full bg-surface2">${esc([S.source, S.brF].filter(Boolean).join(' · '))}</span>` : ''}</div>
+    <div class="flex gap-3 overflow-x-auto pb-1">${cols}</div>
+    <div class="grid md:grid-cols-2 gap-4 mt-5 pt-4 border-t border-line/60"><div><div class="text-[13px] font-semibold mb-1">Nega lid sifatli bo'lmadi</div><div class="text-[11px] text-muted mb-1">Lead statusi bo'yicha${S.brF ? ' (barcha filiallar)' : ''}</div>${reasonList(stBy, 'rose')}</div>
+      <div><div class="text-[13px] font-semibold mb-1">Nega deal sotuvga aylanmadi</div><div class="text-[11px] text-muted mb-1">Yopilgan deal sababi (barcha kanallar)</div>${reasonList(lr, 'amber')}</div></div></div>`;
+}
+// Compare: this period vs the previous one, or channels / branches side by side.
+function compareCard(F, PF) {
+  const mode = S.cmp || 'ch', conv = o => [div(o.qual, o.leads), div(o.came, o.qual), div(o.won, o.came), div(o.won, o.leads)];
+  const heads = ['Lid → sifatli', 'Sifatli → keldi', 'Keldi → sotuv', 'Lid → sotuv'], base = conv(F);
+  const cell = (v, ref) => v == null ? '<span class="text-muted">—</span>' : `<span class="inline-flex px-2 py-0.5 rounded-lg text-[12px] font-semibold tabular-nums" style="${ref == null ? '' : `color:rgb(var(--${v >= ref ? 'success' : 'danger'}));background:rgb(var(--${v >= ref ? 'success' : 'danger'}) / .1)`}">${pct(v)}</span>`;
+  let body;
+  if (mode === 'prev') {
+    const a = conv(F), b = conv(PF);
+    body = `<table class="w-full text-[13px]"><tr class="text-[11px] text-muted text-left"><th class="py-2">Ko'rsatkich</th><th class="text-right">Shu davr</th><th class="text-right">Oldingi ${prevRange().days} kun</th><th class="text-right">Farq</th></tr>
+      ${[['Lid', F.leads, PF.leads, 'n'], ['Sifatli', F.qual, PF.qual, 'n'], ['Filialga keldi', F.came, PF.came, 'n'], ['Sotuv (shu lidlardan)', F.won, PF.won, 'n'], ...heads.map((h, i) => [h, a[i], b[i], 'p'])].map(([l, x, y, k]) => { const dd = k === 'n' ? div(x - y, y) : (x != null && y != null ? x - y : null);
+        return `<tr class="border-t border-line/60"><td class="py-2">${l}</td><td class="text-right font-semibold tabular-nums">${k === 'n' ? num(x) : pct(x)}</td><td class="text-right tabular-nums text-muted">${k === 'n' ? num(y) : pct(y)}</td><td class="text-right tabular-nums font-semibold" style="color:rgb(var(--${dd == null ? 'muted' : dd >= 0 ? 'success' : 'danger'}))">${dd == null ? '—' : (dd >= 0 ? '+' : '') + (k === 'n' ? pct(dd) : (dd * 100).toFixed(1) + ' p.p.')}</td></tr>`; }).join('')}</table>`;
+  } else {
+    const key = mode === 'ch' ? r => channelOf(r.source) : r => r.branch;
+    const rows = (S.data.brDaily || []).filter(r => mode === 'ch' ? (!S.brF || r.branch === S.brF) : (!S.source || channelOf(r.source) === S.source));
+    const by = {}; for (const r of rows) { const k = key(r); if (!k || /^NOMA/.test(k)) continue; const o = by[k] ??= { key: k, leads: 0, contacted: 0, qual: 0, came: 0, won: 0 }; for (const f of ['leads', 'contacted', 'qual', 'came', 'won']) o[f] += +r[f] || 0; }
+    const list = Object.values(by).filter(o => o.leads >= 10).sort((a, b) => b.leads - a.leads), mx = Math.max(1, ...list.map(o => o.leads));
+    const tot = funnelOf(rows), ref = conv(tot);
+    body = `<div class="overflow-x-auto"><table class="w-full text-[13px] min-w-[640px]"><tr class="text-[11px] text-muted text-left"><th class="py-2">${mode === 'ch' ? 'Kanal' : 'Filial'}</th><th>Lid</th>${heads.map(h => `<th class="text-right">${h}</th>`).join('')}<th class="text-right">Sotuv</th></tr>
+      ${list.map(o => { const c = conv(o); return `<tr class="border-t border-line/60 hover:bg-surface2/50 cursor-pointer" data-k="${esc(o.key)}" onclick="setOvFilter('${mode === 'ch' ? 'src' : 'br'}', this.dataset.k)"><td class="py-2 font-semibold">${esc(o.key)}</td><td class="w-[22%]"><div class="flex items-center gap-2"><div class="flex-1 h-2 rounded-full bg-surface2"><div class="h-2 rounded-full" style="width:${(o.leads / mx * 100).toFixed(0)}%;background:rgb(var(--c-blue))"></div></div><span class="tabular-nums text-[12px] w-12 text-right">${num(o.leads)}</span></div></td>${c.map((v, i) => `<td class="text-right">${cell(v, ref[i])}</td>`).join('')}<td class="text-right font-semibold tabular-nums">${num(o.won)}</td></tr>`; }).join('')}
+      <tr class="border-t-2 border-line font-semibold"><td class="py-2">O'rtacha</td><td class="tabular-nums">${num(tot.leads)}</td>${ref.map(v => `<td class="text-right tabular-nums">${pct(v)}</td>`).join('')}<td class="text-right tabular-nums">${num(tot.won)}</td></tr></table></div>`;
+  }
+  return `<div class="${BOX} mb-3"><div class="flex flex-wrap items-center justify-between gap-3 mb-3"><div><h3 class="font-semibold text-[15px]">Solishtirish</h3><p class="text-[11.5px] text-muted">${mode === 'prev' ? 'Shu davr va oldingi davr, tanlangan filtr bo\'yicha.' : `Yashil — o'rtachadan yaxshi, qizil — yomon. Qatorni bossangiz, sahifa shu ${mode === 'ch' ? 'kanal' : 'filial'} bo'yicha filtrlanadi.`}</p></div>
+    ${segBtn([['ch', 'Kanallar'], ['br', 'Filiallar'], ['prev', "O'tgan davr"]], mode, "S.cmp='$';render()")}</div>${body}</div>`;
+}
+// Branch ranking: sales and the lead → sale rate.
+function branchRank() {
+  const rows = (S.data.brDaily || []).filter(r => !S.source || channelOf(r.source) === S.source), by = {};
+  for (const r of rows) { if (!r.branch || /^NOMA/.test(r.branch)) continue; const o = by[r.branch] ??= { k: r.branch, leads: 0, qual: 0, sold: 0 }; o.leads += +r.leads; o.qual += +r.qual; }
+  for (const p of salesList()) if (by[p.branch]) by[p.branch].sold++;
+  const list = Object.values(by).sort((a, b) => b.sold - a.sold).slice(0, 8), mx = list[0]?.sold || 1;
+  return `<div class="${BOX}"><h3 class="font-semibold text-[15px]">Filiallar reytingi</h3><p class="text-[11px] text-muted mb-2">sotuv · sifatli lid ulushi</p>${list.map((o, i) => `<button data-k="${esc(o.k)}" onclick="setOvFilter('br', this.dataset.k)" class="w-full text-left py-1.5 group"><div class="flex justify-between gap-2 text-[12.5px]"><span class="truncate group-hover:text-accent"><span class="text-muted tabular-nums">${i + 1}.</span> ${esc(o.k)}</span><span class="tabular-nums whitespace-nowrap"><b>${num(o.sold)}</b> <span class="text-[11px] text-muted">${pct(div(o.qual, o.leads), 0)}</span></span></div><div class="h-1.5 rounded-full bg-surface2 mt-1"><div class="h-1.5 rounded-full" style="width:${(o.sold / mx * 100).toFixed(0)}%;background:rgb(var(--c-teal))"></div></div></button>`).join('') || empty("Ma'lumot yo'q")}</div>`;
+}
+// Ads that sell vs ads that only spend.
+function creativeRank() {
+  const { rows } = adAgg('ad'), best = rows.filter(o => o.won).sort((a, b) => b.won - a.won || a.spend - b.spend).slice(0, 4), waste = rows.filter(o => o.spend >= 15 && !o.won && !o.qual).sort((a, b) => b.spend - a.spend).slice(0, 4);
+  const item = (o, good) => `<div class="flex items-center gap-2.5 py-1.5">${o.thumb ? `<img src="${esc(o.thumb)}" referrerpolicy="no-referrer" class="w-8 h-8 rounded-lg object-cover shrink-0" alt="">` : '<div class="w-8 h-8 rounded-lg bg-surface2 shrink-0"></div>'}<div class="min-w-0 flex-1"><div class="text-[12px] truncate">${esc(o.name)}</div><div class="text-[11px] text-muted tabular-nums">${adMoney(o.spend, false)} · ${num(o.leads)} lid</div></div><b class="text-[12.5px] tabular-nums whitespace-nowrap" style="color:rgb(var(--${good ? 'success' : 'danger'}))">${good ? num(o.won) + ' sotuv' : '0 sifatli'}</b></div>`;
+  return `<div class="${BOX}"><h3 class="font-semibold text-[15px]">Kreativlar</h3><p class="text-[11px] text-muted mb-1">eng ko'p sotgan / pul yeyotgan</p>${best.map(o => item(o, true)).join('') || '<div class="text-[12px] text-muted py-2">Sotuv bergan e\'lon yo\'q</div>'}<div class="border-t border-line/60 my-1.5"></div>${waste.map(o => item(o, false)).join('') || '<div class="text-[12px] text-muted py-2">Pul yeyotgan e\'lon yo\'q</div>'}</div>`;
 }
 const BOX = 'bg-surface rounded-3xl p-5 border border-line/50';
 const svgArc = (r, frac, color, w, track = true) => { const c = 2 * Math.PI * r, f = Math.max(0, Math.min(1, frac || 0)); return `${track ? `<circle r="${r}" fill="none" stroke="rgb(var(--c-${color}) / .14)" stroke-width="${w}"/>` : ''}<circle r="${r}" fill="none" stroke="rgb(var(--c-${color}))" stroke-width="${w}" stroke-linecap="round" stroke-dasharray="${(c * f).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90)"/>`; };
@@ -620,9 +696,10 @@ const CH_COLS = [
 const chColOn = c => chColsPref[c.k] ?? !c.off;
 function channelRows(R) {
   const by = {}, blank = key => ({ key, leads: 0, contacted: 0, qual: 0, came: 0, deals: 0, in_progress: 0, junk: 0, cohort: 0, sold: 0, rev: 0, spend: null, plan: 0 });
-  for (const o of groupSum(S.data.daily, r => channelOf(r.source))) Object.assign(by[o.key] ??= blank(o.key), { leads: o.leads, contacted: o.contacted, qual: o.qual, came: o.came_to_branch, deals: o.deals, in_progress: o.in_progress, junk: o.junk, cohort: o.won });
-  for (const p of salesList(true)) { const o = by[channelOf(p.source)] ??= blank(channelOf(p.source)); o.sold++; o.rev += +p.amount || 0; }
-  if (by.Target) by.Target.spend = S.data.spend.reduce((a, r) => a + +r.spend, 0);
+  if (S.brF) { for (const r of S.data.brDaily.filter(r => r.branch === S.brF)) { const o = by[channelOf(r.source)] ??= { ...blank(channelOf(r.source)), deals: null, in_progress: null, junk: null }; o.leads += +r.leads; o.contacted += +r.contacted; o.qual += +r.qual; o.came += +r.came; o.cohort += +r.won; } }
+  else for (const o of groupSum(S.data.daily, r => channelOf(r.source))) Object.assign(by[o.key] ??= blank(o.key), { leads: o.leads, contacted: o.contacted, qual: o.qual, came: o.came_to_branch, deals: o.deals, in_progress: o.in_progress, junk: o.junk, cohort: o.won });
+  for (const p of salesList(true)) { if (S.brF && p.branch !== S.brF) continue; const o = by[channelOf(p.source)] ??= blank(channelOf(p.source)); o.sold++; o.rev += +p.amount || 0; }
+  if (by.Target) by.Target.spend = S.brF ? S.data.brSpend.filter(r => r.branch === S.brF).reduce((a, r) => a + +r.spend, 0) : S.data.spend.reduce((a, r) => a + +r.spend, 0);
   if (R.p) for (const o of Object.values(by)) o.plan = R.leads * (+(R.p.channels?.[o.key] ?? 0) / 100);
   return Object.values(by).filter(o => o.leads || o.sold).sort((a, b) => b.leads - a.leads);
 }
