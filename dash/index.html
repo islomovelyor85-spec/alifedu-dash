@@ -418,7 +418,8 @@ function overviewKpi(t) {
     ${unit('Mijoz narxi (CAC)', usd(div(spend, tSales.length)), delta(div(spend, tSales.length), div(pSpend, pTSales.length), true, usd), spark(rolling(days, spendD, tSaleD, 14), 'violet'), 'violet')}
     ${unit('ROMI', pct(romi), `<span class="text-muted">${months > 1 ? `${months} oy o'qisa <b class="text-fg">${pct(romiLtv)}</b>` : "1-oy tushumi bo'yicha"}</span>`, '', romi >= 0 ? 'green' : 'rose')}
   </div></div>`;
-  return `<div class="grid grid-cols-1 md:grid-cols-6 xl:grid-cols-12 md:grid-flow-row-dense gap-3 mb-6">
+  const ins = insights({ t, T, pT, sold, spend, pSpend, R, tSales, pTSales });
+  return ins + `<div class="grid grid-cols-1 md:grid-cols-6 xl:grid-cols-12 md:grid-flow-row-dense gap-3 mb-6">
     ${heroSales(sales, sold, rev, pSales, R, days, pipe)}
     ${funnelFlow(t, sold, R)}
     ${planRings(t, sold, spend, R)}
@@ -451,12 +452,12 @@ function heroSales(sales, sold, rev, pSales, R, days, pipe) {
     <div class="relative flex items-start justify-between gap-3"><div><div class="text-[12.5px] opacity-85 font-medium">Sotuvlar · ${fmtDay(S.from)} — ${fmtDay(S.to)}</div><div class="flex items-baseline gap-3 mt-1"><span class="num-xl text-[52px] font-bold leading-none tabular-nums">${num(sold)}</span>${ch != null ? `<span class="text-[12px] font-semibold px-2 py-0.5 rounded-full bg-white/20 tabular-nums">${ch >= 0 ? '↑' : '↓'} ${Math.abs(ch * 100).toFixed(1)}%</span>` : ''}</div><div class="text-[12px] opacity-80 mt-1">${R.sales ? `plan ${num(R.sales)} · <b>${pct(r)}</b> bajarildi` : 'plan kiritilmagan'} · oldin ${num(pSales.length)}</div></div>
     <div class="text-right text-[11px] opacity-85 leading-5"><div><span class="inline-block w-4 border-t-2 border-white align-middle mr-1"></span>fakt</div>${b ? `<div><span class="inline-block w-4 border-t-2 border-dashed border-white/80 align-middle mr-1"></span>plan sur'ati</div>` : ''}</div></div>
     <div class="relative mt-2 -mx-1">${chart}</div>
-    <div class="relative grid grid-cols-3 gap-2 mt-2">${mini('Tushum (1-oy)', somMoney(rev))}${mini("O'rtacha chek", somMoney(div(rev, sold)))}${mini('Ochiq deallardan', pipe ? '~' + num(pipe) + ' ta' : '—')}</div></div>`;
+    <div class="relative grid grid-cols-3 gap-2 mt-2">${mini('Tushum (1-oy)', somMoney(rev))}${mini("O'rtacha chek", somMoney(div(rev, sold)))}${(() => { const m = monthPace(); return m ? mini(`${MONTH_FULL[+m.key.slice(5, 7) - 1]} oxiriga prognoz`, `${num(m.forecast)} <span class="text-[11px] font-medium opacity-80">/ ${num(m.plan)}</span>`) : mini('Oldingi davr', num(pSales.length)); })()}</div></div>`;
 }
 // Funnel as one flowing band that narrows stage by stage.
 function funnelFlow(t, sold, R) {
   const p = R.p, cohort = t.won;
-  const st = [['Lid', t.leads, R.leads, 'blue'], ['Sifatli lid', t.qual, R.qual, 'teal'], ['Filialga keldi', t.came_to_branch, R.came, 'violet'], ['Sotuv', sold, R.sales, 'green']];
+  const st = [['Lid', t.leads, 'blue'], ['Sifatli lid', t.qual, 'teal'], ['Filialga keldi', t.came_to_branch, 'violet'], ['Sotuvga aylandi', cohort, 'green']];
   const conv = [[div(t.qual, t.leads), p && +p.lead_qual], [div(t.came_to_branch, t.qual), p && +p.qual_came], [div(cohort, t.came_to_branch), p && +p.came_sale]];
   const tone = r => r == null ? 'muted' : r >= 0.9 ? 'success' : r >= 0.7 ? 'warn' : 'danger';
   const W = 600, H = 150, hs = st.map(([, v]) => Math.max(Math.sqrt(div(v, t.leads) || 0) * H, 12)), xs = [0, W / 3, 2 * W / 3, W];
@@ -464,19 +465,19 @@ function funnelFlow(t, sold, R) {
   let path = `M0,${top[0]}`; for (let i = 1; i < 4; i++) { const mx = (xs[i - 1] + xs[i]) / 2; path += ` C${mx},${top[i - 1]} ${mx},${top[i]} ${xs[i]},${top[i]}`; }
   path += ` L${W},${bot[3]}`; for (let i = 3; i > 0; i--) { const mx = (xs[i - 1] + xs[i]) / 2; path += ` C${mx},${bot[i]} ${mx},${bot[i - 1]} ${xs[i - 1]},${bot[i - 1]}`; } path += ' Z';
   const band = `<svg viewBox="0 0 ${W} ${H}" class="w-full h-[150px]" preserveAspectRatio="none"><defs><linearGradient id="fflow" x1="0" x2="1" y1="0" y2="0"><stop offset="0" stop-color="rgb(var(--c-blue))"/><stop offset=".4" stop-color="rgb(var(--c-teal))"/><stop offset=".7" stop-color="rgb(var(--c-violet))"/><stop offset="1" stop-color="rgb(var(--c-green))"/></linearGradient></defs><path d="${path}" fill="url(#fflow)" fill-opacity=".9"/>${[1, 2].map(i => `<line x1="${xs[i]}" x2="${xs[i]}" y1="0" y2="${H}" stroke="rgb(var(--surface))" stroke-width="2" stroke-opacity=".7"/>`).join('')}</svg>`;
-  const head = st.map(([l, v, plan, c]) => { const r = plan ? div(v, plan) : null; return `<div class="min-w-0"><div class="flex items-center gap-1.5 text-[11.5px] text-muted font-medium"><span class="w-2 h-2 rounded-full" style="background:rgb(var(--c-${c}))"></span>${l}</div><div class="num-xl text-[26px] font-bold tabular-nums leading-tight">${num(v)}</div><div class="text-[11px] tabular-nums ${plan ? '' : 'text-muted'}">${plan ? `<span style="color:rgb(var(--${tone(r)}))" class="font-semibold">${Math.round(r * 100)}%</span> <span class="text-muted">/ ${num(plan)}</span>` : 'plan yo\'q'}</div></div>`; }).join('');
+  const head = st.map(([l, v, c], i) => `<div class="min-w-0"><div class="flex items-center gap-1.5 text-[11.5px] text-muted font-medium"><span class="w-2 h-2 rounded-full" style="background:rgb(var(--c-${c}))"></span>${l}</div><div class="num-xl text-[26px] font-bold tabular-nums leading-tight">${num(v)}</div><div class="text-[11px] text-muted tabular-nums">${i ? `${pct(div(v, t.leads))} liddan` : 'shu davrda kelgan'}</div></div>`).join('');
   const convRow = conv.map(([v, plan]) => { const r = plan ? div(v, plan) : null; return `<div class="text-center"><span class="inline-flex items-center gap-1 text-[12px] font-bold px-2.5 py-1 rounded-full tabular-nums" style="color:rgb(var(--${tone(r)}));background:rgb(var(--${tone(r)}) / .12)"><i class="ph-bold ph-arrow-right text-[10px]"></i>${pct(v)}</span>${plan ? `<div class="text-[10.5px] text-muted mt-0.5">plan ${pct(plan)}</div>` : ''}</div>`; }).join('');
-  return `<div class="${BOX} xl:col-span-7 md:col-span-6"><div class="flex flex-wrap items-center justify-between gap-2 mb-3"><h3 class="font-semibold text-[15px]">Voronka va plan</h3><span class="text-[11px] text-muted">${R.has ? `${rangeDays().length} kunlik plan${R.missing.length ? ` · ${R.missing.map(monthName).join(', ')}da plan yo'q` : ''}` : `<button onclick="S.sec.overview='set';render()" class="text-accent font-semibold">Plan kiritish</button>`}</span></div>
-    <div class="grid grid-cols-4 gap-3">${head}</div><div class="my-3">${band}</div><div class="grid grid-cols-[1fr_1fr_1fr] gap-3 px-[8%]">${convRow}</div>${sold !== cohort ? `<div class="text-[10.5px] text-muted mt-2">Konversiyalar shu davr leadlari ichida: ${num(sold)} sotuvdan ${num(cohort)} tasi shu leadlardan.</div>` : ''}${planForecastLine()}</div>`;
+  return `<div class="${BOX} xl:col-span-7 md:col-span-6"><div class="flex flex-wrap items-center justify-between gap-2 mb-3"><h3 class="font-semibold text-[15px]">Voronka va plan</h3><span class="text-[11px] text-muted">Strelkada — keyingi bosqichga o'tganlar foizi, ostida plandagi foiz</span></div>
+    <div class="grid grid-cols-4 gap-3">${head}</div><div class="my-3">${band}</div><div class="grid grid-cols-[1fr_1fr_1fr] gap-3 px-[8%]">${convRow}</div><div class="text-[10.5px] text-muted mt-3">Faqat shu davrda kelgan leadlar yo'li.${sold !== cohort ? ` Davrdagi jami ${num(sold)} sotuvning qolgan ${num(sold - cohort)} tasi oldingi oylar leadlaridan.` : ''}</div></div>`;
 }
 // Plan completion as concentric rings.
 function planRings(t, sold, spend, R) {
   const items = [['Lid', t.leads, R.leads, 'blue'], ['Sifatli', t.qual, R.qual, 'teal'], ['Keldi', t.came_to_branch, R.came, 'violet'], ['Sotuv', sold, R.sales, 'green']];
   if (!R.has) return `<div class="${BOX} xl:col-span-3 md:col-span-3 flex flex-col items-center justify-center text-center gap-3"><i class="ph-bold ph-target text-4xl text-muted"></i><div class="text-sm font-semibold">Plan kiritilmagan</div><button onclick="S.sec.overview='set';render()" class="h-9 px-4 rounded-xl bg-fg text-surface text-sm font-semibold">Kiritish</button></div>`;
   const rings = items.map(([, v, plan, c], i) => svgArc(63 - i * 11, div(v, plan), c, 8)).join('');
-  const avg = div(items.reduce((a, [, v, plan]) => a + Math.min(div(v, plan) || 0, 1.5), 0), 4);
-  return `<div class="${BOX} xl:col-span-3 md:col-span-3"><h3 class="font-semibold text-[15px] mb-3">Plan bajarilishi</h3><div class="flex items-center gap-4"><div class="relative shrink-0"><svg viewBox="-70 -70 140 140" class="w-[132px] h-[132px]">${rings}</svg><div class="absolute inset-0 flex flex-col items-center justify-center"><span class="text-[15px] font-bold tabular-nums">${Math.round(avg * 100)}%</span></div></div>
-    <div class="space-y-2 min-w-0 flex-1">${items.map(([l, v, plan, c]) => `<div class="flex items-center justify-between gap-2 text-[12.5px]"><span class="flex items-center gap-1.5 text-muted"><span class="w-2 h-2 rounded-full" style="background:rgb(var(--c-${c}))"></span>${l}</span><b class="tabular-nums">${Math.round((div(v, plan) || 0) * 100)}%</b></div>`).join('')}</div></div></div>`;
+  const salesR = div(sold, R.sales) || 0;
+  return `<div class="${BOX} xl:col-span-3 md:col-span-3"><h3 class="font-semibold text-[15px]">Plan bajarilishi</h3><p class="text-[11px] text-muted mb-3">${rangeDays().length} kunlik plandan</p><div class="flex items-center gap-4"><div class="relative shrink-0"><svg viewBox="-70 -70 140 140" class="w-[132px] h-[132px]">${rings}</svg><div class="absolute inset-0 flex flex-col items-center justify-center"><span class="text-[15px] font-bold tabular-nums">${Math.round(salesR * 100)}%</span><span class="text-[9px] text-muted -mt-0.5">sotuv</span></div></div>
+    <div class="space-y-2 min-w-0 flex-1">${items.map(([l, v, plan, c]) => `<div class="flex items-center justify-between gap-2 text-[12.5px]"><span class="flex items-center gap-1.5 text-muted"><span class="w-2 h-2 rounded-full" style="background:rgb(var(--c-${c}))"></span>${l}</span><span class="tabular-nums"><b>${Math.round((div(v, plan) || 0) * 100)}%</b> <span class="text-[10.5px] text-muted">${num(v)}/${num(plan)}</span></span></div>`).join('')}</div></div></div>`;
 }
 // Leads per day (all channels in the filter), qualified ones as the darker part; the best day is marked.
 function leadBars(days) {
@@ -507,7 +508,7 @@ function channelDonut(sales, sold) {
   const top = by.slice(0, 5), rest = by.slice(5).reduce((a, [, o]) => a + o.n, 0); if (rest) top.push(['Boshqalar', { n: rest }]);
   let acc = 0; const r = 52, c = 2 * Math.PI * r;
   const segs = top.map(([, o], i) => { const f = o.n / (sold || 1), seg = `<circle r="${r}" fill="none" stroke="rgb(var(--c-${C[i % C.length]}))" stroke-width="16" stroke-dasharray="${Math.max(c * f - 2, 0).toFixed(1)} ${c.toFixed(1)}" stroke-dashoffset="${(-c * acc).toFixed(1)}" transform="rotate(-90)"/>`; acc += f; return seg; }).join('');
-  return `<div class="${BOX} xl:col-span-3 md:col-span-3"><h3 class="font-semibold text-[15px] mb-3">Sotuv qayerdan</h3><div class="flex items-center gap-3"><div class="relative shrink-0"><svg viewBox="-70 -70 140 140" class="w-[104px] h-[104px]"><circle r="${r}" fill="none" stroke="rgb(var(--surface2))" stroke-width="16"/>${segs}</svg><div class="absolute inset-0 flex flex-col items-center justify-center"><span class="text-[20px] font-bold tabular-nums">${num(sold)}</span><span class="text-[10px] text-muted">sotuv</span></div></div>
+  return `<div class="${BOX} xl:col-span-3 md:col-span-3"><h3 class="font-semibold text-[15px]">Sotuv qayerdan</h3><p class="text-[11px] text-muted mb-3">sotuvlarning kanallar bo'yicha ulushi</p><div class="flex items-center gap-3"><div class="relative shrink-0"><svg viewBox="-70 -70 140 140" class="w-[104px] h-[104px]"><circle r="${r}" fill="none" stroke="rgb(var(--surface2))" stroke-width="16"/>${segs}</svg><div class="absolute inset-0 flex flex-col items-center justify-center text-center px-5"><span class="text-[17px] font-bold tabular-nums leading-tight">${pct(top[0] ? top[0][1].n / (sold || 1) : null)}</span><span class="text-[9.5px] text-muted leading-tight truncate max-w-full">${esc(top[0]?.[0] || '')}</span></div></div>
     <div class="space-y-1.5 min-w-0 flex-1">${top.map(([k, o], i) => `<div class="flex items-center justify-between gap-2 text-[11.5px]"><span class="flex items-center gap-1.5 min-w-0"><span class="w-2 h-2 rounded-full shrink-0" style="background:rgb(var(--c-${C[i % C.length]}))"></span><span class="truncate" title="${esc(k)}">${esc(k)}</span></span><b class="tabular-nums">${pct(o.n / (sold || 1))}</b></div>`).join('')}</div></div></div>`;
 }
 // Managers who closed the most sales in the period.
@@ -515,6 +516,49 @@ function managerBoard(sales) {
   const by = Object.entries(countBy(sales.filter(p => !isHiddenUser(p.manager)), p => p.manager || '—')).sort((a, b) => b[1].n - a[1].n).slice(0, 5), mx = by[0]?.[1].n || 1, C = ['amber', 'blue', 'teal', 'violet', 'green'];
   const ini = n => String(n).split('|')[0].trim().split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase();
   return `<div class="${BOX} xl:col-span-3 md:col-span-3"><h3 class="font-semibold text-[15px] mb-3">Eng ko'p sotgan menejerlar</h3><div class="space-y-2.5">${by.map(([k, o], i) => `<div class="flex items-center gap-2.5"><div class="w-8 h-8 rounded-full shrink-0 flex items-center justify-center text-[11px] font-bold text-white" style="background:rgb(var(--c-${C[i]}))">${esc(ini(k))}</div><div class="min-w-0 flex-1"><div class="flex justify-between gap-2 text-[12.5px]"><span class="truncate font-medium">${esc(String(k).split('|')[0].trim())}</span><b class="tabular-nums">${num(o.n)}</b></div><div class="h-1.5 rounded-full bg-surface2 mt-1"><div class="h-1.5 rounded-full" style="width:${(o.n / mx * 100).toFixed(0)}%;background:rgb(var(--c-${C[i]}))"></div></div></div></div>`).join('') || empty("Sotuv yo'q")}</div></div>`;
+}
+// Current month: sales so far, run-rate forecast, plan and what is needed per day.
+function monthPace() {
+  const today = iso(new Date()), key = today.slice(0, 7) + '-01', p = S.data.plans.find(x => x.month === key);
+  if (S.to !== today || !p || !+p.sales) return null;
+  const elapsed = +today.slice(8), dim = new Date(+today.slice(0, 4), +today.slice(5, 7), 0).getDate(), left = dim - elapsed;
+  const sold = (S.data.purchases || []).filter(x => x.day >= key && x.day <= today).length;
+  return { key, sold, plan: +p.sales, forecast: Math.round(sold / elapsed * dim), left, need: left ? Math.max(0, Math.ceil((+p.sales - sold) / left)) : 0, rate: sold / elapsed };
+}
+// What the numbers say, in plain words: at most 5 findings, worst first, each with what to do.
+function insights({ t, T, pT, sold, spend, pSpend, R, tSales, pTSales }) {
+  const out = [], add = (tone, icon, title, text, act) => out.push({ tone, icon, title, text, act });
+  const m = monthPace(), monthly = {}; for (const p of S.data.purchases || []) monthly[p.day.slice(0, 7)] = (monthly[p.day.slice(0, 7)] || 0) + 1;
+  const past = Object.entries(monthly).filter(([k]) => k < iso(new Date()).slice(0, 7)).sort().slice(-3), avgM = past.length ? past.reduce((a, [, n]) => a + n, 0) / past.length : null;
+  if (m) {
+    const r = div(m.forecast, m.plan);
+    if (r < 0.9) add(r < 0.6 ? 'danger' : 'warn', 'ph-target', `${MONTH_FULL[+m.key.slice(5, 7) - 1]} plani bajarilmaydi`, `Hozir ${num(m.sold)} ta sotuv, shu tezlikda oy ${num(m.forecast)} ta bilan tugaydi — plan ${num(m.plan)} (${pct(r)}). Planga yetish uchun qolgan ${m.left} kunda kuniga ${num(m.need)} ta kerak, hozir ${m.rate.toFixed(1)}.`,
+      avgM && m.plan > avgM * 1.8 ? `Oxirgi ${past.length} oyda o'rtacha oyiga ${num(avgM)} ta sotuv bo'lgan — plan ${(m.plan / avgM).toFixed(1)} barobar katta. Planni realga tushiring yoki byudjetni oshiring.` : "Byudjet va lead oqimini oshiring, ochiq deallarni yoping.");
+    else add('success', 'ph-target', 'Plan bajarilyapti', `Shu tezlikda oy ${num(m.forecast)} ta sotuv bilan tugaydi (plan ${num(m.plan)}).`, '');
+  }
+  // The funnel step furthest below its plan.
+  const p = R.p;
+  if (p) {
+    const steps = [['Lid → sifatli', div(t.qual, t.leads), +p.lead_qual, "Lead forma savollari va auditoriyani tekshiring: sifatsiz leadlar ko'p. Kreativlar sahifasida sifatli lead bermayotganlarini to'xtating."],
+      ['Sifatli → filialga keldi', div(t.came_to_branch, t.qual), +p.qual_came, "Menejerlar sifatli leadni sinov darsiga yozishi sust — qo'ng'iroqlar tahlilidagi «yopish» bosqichini ko'ring."],
+      ['Filialga keldi → sotuv', div(t.won, t.came_to_branch), +p.came_sale, "Filialga kelganlarning ko'pi sotib olmayapti — filialdagi sinov darsi va narx suhbatini tekshiring."]]
+      .filter(x => x[1] != null && x[2]).map(x => [...x, x[1] / x[2]]).sort((a, b) => a[4] - b[4]);
+    const w = steps[0];
+    if (w && w[4] < 0.85) add('danger', 'ph-funnel', `Eng tor joy: ${w[0]}`, `Fakt ${pct(w[1])}, plan ${pct(w[2])} — planning ${Math.round(w[4] * 100)}% i. Sotuvni aynan shu bosqich ushlab turibdi.`, w[3]);
+  }
+  // Cost of a qualified lead against the previous period.
+  const cq = div(spend, T.qual), pcq = div(pSpend, pT.qual);
+  if (cq && pcq) { const d = cq / pcq - 1; if (Math.abs(d) >= 0.15) add(d > 0 ? 'warn' : 'success', 'ph-currency-dollar', `Sifatli lid narxi ${d > 0 ? 'oshdi' : 'tushdi'}: ${adMoney(cq, false)}`, `Oldingi ${prevRange().days} kunda ${adMoney(pcq, false)} edi (${d > 0 ? '+' : ''}${Math.round(d * 100)}%).`, d > 0 ? "Kreativlar sahifasida qimmatlashgan e'lonlarni toping va almashtiring." : "Ishlayotgan kreativlarga byudjetni ko'paytirsa bo'ladi."); }
+  // Ad spend against the plan budget for these days.
+  if (R.budget) { const r = spend / R.budget; if (r < 0.7) add('warn', 'ph-wallet', `Reklamaga plandan kam sarflanyapti (${pct(r)})`, `Shu kunlarga ${adMoney(R.budget, false)} rejalangan, sarflandi ${adMoney(spend, false)}. Lead kam kelishining sababi shu bo'lishi mumkin.`, "Sifatli lead narxi yaxshi bo'lgan kampaniyalarga byudjet qo'shing."); else if (r > 1.15) add('warn', 'ph-wallet', `Reklama byudjeti oshib ketdi (${pct(r)})`, `Rejalangan ${adMoney(R.budget, false)}, sarflandi ${adMoney(spend, false)}.`, "Sotuv bermayotgan kampaniyalarni qisqartiring."); }
+  // Open deals worth calling today.
+  const hot = (S.data.forecast || []).filter(r => +r.prob >= 0.5);
+  if (hot.length) add('success', 'ph-phone-call', `${num(hot.length)} ta deal sotuvga yaqin`, `Ehtimoli 50% dan yuqori ochiq deallar — pastdagi «Sotuv ehtimoli bor deallar» ro'yxatida.`, "Menejerlar bugun shularga qo'ng'iroq qilsin.");
+  const order = { danger: 0, warn: 1, success: 2 }; out.sort((a, b) => order[a.tone] - order[b.tone]);
+  if (!out.length) return '';
+  const toneC = { danger: 'danger', warn: 'warn', success: 'success' };
+  return `<div class="bg-surface rounded-3xl p-5 mb-3 border border-line/50"><div class="flex items-center gap-2 mb-3"><i class="ph-bold ph-lightbulb text-accent"></i><h3 class="font-semibold text-[15px]">Asosiy xulosalar</h3><span class="text-[11px] text-muted">— raqamlar avtomatik tahlili</span></div>
+    <div class="grid md:grid-cols-2 xl:grid-cols-3 gap-2.5">${out.slice(0, 6).map(x => `<div class="rounded-2xl p-3.5 border" style="border-color:rgb(var(--${toneC[x.tone]}) / .3);background:rgb(var(--${toneC[x.tone]}) / .06)"><div class="flex items-start gap-2"><i class="ph-bold ${x.icon} mt-0.5" style="color:rgb(var(--${toneC[x.tone]}))"></i><div class="min-w-0"><div class="font-semibold text-[13.5px] leading-snug">${x.title}</div><div class="text-[12.5px] text-muted mt-1 leading-snug">${x.text}</div>${x.act ? `<div class="text-[12.5px] mt-1.5 font-medium leading-snug"><i class="ph-bold ph-arrow-right text-[11px]"></i> ${x.act}</div>` : ''}</div></div></div>`).join('')}</div></div>`;
 }
 function planForecastLine() {
   const today = iso(new Date()), mKey = today.slice(0, 7) + '-01', cur = S.data.plans.find(x => x.month === mKey);
