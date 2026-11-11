@@ -177,7 +177,7 @@ function calendar() {
     </div></div>`;
 }
 // Sidebar: every screen is listed directly, under a group title. Nothing is hidden behind a parent page.
-const NAV = ADMIN ? [['', [['status', 'Holat', 'ph-pulse'], ['integr', 'Ulanishlar', 'ph-plugs-connected'], ['mapping', 'Mapping', 'ph-sliders-horizontal'], ['settings', 'Sozlamalar', 'ph-gear'], ['users', 'Foydalanuvchilar', 'ph-user-gear']]]] : [
+const NAV = ADMIN ? [['', [['status', 'Holat', 'ph-pulse'], ['integr', 'Ulanishlar', 'ph-plugs-connected'], ['mapping', 'Mapping', 'ph-sliders-horizontal'], ['settings', 'Sozlamalar', 'ph-gear'], ['users', 'Foydalanuvchilar', 'ph-user-gear'], ['companies', 'Kompaniyalar', 'ph-buildings']]]] : [
   ['', [['overview', 'Umumiy', 'ph-squares-four'], ['funnel', 'Voronka', 'ph-funnel'], ['branches', 'Filiallar', 'ph-buildings']]],
   ['Manbalar', [['daily', 'Kunlar', 'ph-calendar-dots'], ['leads', 'Lead tahlili', 'ph-user-list']]],
   ['Sotuv va pul', [['purchases', 'Sotuvlar', 'ph-receipt'], ['economy', 'Iqtisodiyot', 'ph-coins']]],
@@ -267,7 +267,8 @@ async function load() {
   const [prevDaily, prevSpend, forecast, prevBr] = await Promise.all([q('v_daily_outcomes', pday), q('v_spend_daily', pday), q('v_deal_forecast'), q('v_branch_daily', pday)]);
   Object.assign(S.data, { prevDaily, prevSpend, forecast, prevBr });
   S.data.purchases = await purchasesP;
-  S.data.me = ADMIN ? (await q('admins'))[0] : null;
+  S.data.me = ADMIN ? { email: (await sbc.auth.getUser()).data.user?.email } : null;
+  if (ADMIN && S.super) S.data.companiesAll = (await sbc.rpc('companies_overview')).data || [];
   S.data.chanMap = Object.fromEntries(crmMap.filter(r => r.kind === 'source').map(r => [srcName[r.code] || r.code, r.value]));
   S.data.hiddenUsers = new Set(crmMap.filter(r => r.kind === 'user' && r.value === 'hide').map(r => normName(users[r.code])));
 }
@@ -295,10 +296,11 @@ function shell(body) {
   const present = new Set([...(d.daily || []), ...(d.cohortSrc || []), ...(d.wonDaily || [])].map(r => channelOf(r.source)));
   const sources = ['', ...allChannels().filter(c => present.has(c))];
   const navItem = ([k, t, i]) => `<button onclick="goPage('${k}')" class="nav-item ${S.page === k ? 'active' : ''} w-full flex items-center gap-2.5 px-3 h-[30px] rounded-lg text-[13px] font-medium text-muted hover:text-fg hover:bg-surface2 transition"><i class="ph-bold ${i} text-base"></i>${t}</button>`;
-  const nav = NAV.map(([g, items]) => `${g ? `<div class="px-3 pt-3 pb-1 text-[10px] font-semibold tracking-[.14em] uppercase text-muted/70">${g}</div>` : '<div class="pt-3"></div>'}${items.map(navItem).join('')}`).join('');
+  const nav = NAV.map(([g, items]) => `${g ? `<div class="px-3 pt-3 pb-1 text-[10px] font-semibold tracking-[.14em] uppercase text-muted/70">${g}</div>` : '<div class="pt-3"></div>'}${items.filter(i => i[0] !== 'companies' || S.super).map(navItem).join('')}`).join('');
   return `<div class="min-h-screen">
     <aside class="${S.menu ? 'flex' : 'hidden'} lg:flex fixed inset-y-0 left-0 z-30 w-60 flex-col bg-surface border-r border-line">
-      <div class="px-5 h-16 flex items-center gap-2.5 border-b border-line"><div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:rgb(var(--accent) / .18)"><i class="ph-bold ${ADMIN ? 'ph-shield-check' : 'ph-chart-line-up'} text-accent"></i></div><div><div class="font-bold text-sm leading-tight">${ADMIN ? 'Admin panel' : 'Sotuv auditi'}</div><div class="text-[11px] text-muted leading-tight">Robbit akademiyasi</div></div></div>
+      <div class="px-5 h-16 flex items-center gap-2.5 border-b border-line"><div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:rgb(var(--accent) / .18)"><i class="ph-bold ${ADMIN ? 'ph-shield-check' : 'ph-chart-line-up'} text-accent"></i></div><div><div class="font-bold text-sm leading-tight">${ADMIN ? 'Admin panel' : 'Sotuv auditi'}</div><div class="text-[11px] text-muted leading-tight truncate max-w-[150px]">${esc(companyName())}</div></div></div>
+      ${S.super && (S.companies || []).length > 1 ? `<div class="px-3 pt-3"><label class="block text-[10px] font-semibold tracking-[.14em] uppercase text-muted/70 px-1 mb-1">Kompaniya</label><select onchange="switchCompany(+this.value)" class="w-full h-9 px-2 rounded-lg bg-surface2 border border-line text-[13px] font-semibold">${S.companies.map(c => `<option value="${c.id}" ${c.id === S.company ? 'selected' : ''}>${esc(c.name)}${c.active ? '' : " (o'chiq)"}</option>`).join('')}</select></div>` : ''}
       <nav class="flex-1 overflow-y-auto px-3 pb-4">${nav}</nav>
       <div class="p-3 border-t border-line"><a href="${SWITCH_URL}" class="w-full flex items-center gap-2.5 px-3 h-[30px] rounded-lg text-[13px] text-muted hover:text-fg hover:bg-surface2"><i class="ph-bold ${ADMIN ? 'ph-arrow-left' : 'ph-shield-check'}"></i>${ADMIN ? 'Hisobotlarga qaytish' : 'Admin panel'}</a><button onclick="sbc.auth.signOut().then(boot)" class="w-full flex items-center gap-2.5 px-3 h-[30px] rounded-lg text-[13px] text-muted hover:text-fg hover:bg-surface2"><i class="ph-bold ph-sign-out"></i>Chiqish</button></div>
     </aside>
@@ -1380,14 +1382,14 @@ async function savePrices(e) {
   e.preventDefault();
   const prices = { default: +$('prDefault').value || 0 };
   for (const i of document.querySelectorAll('input[data-price]')) if (i.value !== '' && +i.value > 0) prices[i.dataset.price] = +i.value;
-  const { error } = await sbc.from('audit_settings').update({ prices, updated_at: new Date().toISOString() }).eq('id', 1);
+  const { error } = await sbc.from('audit_settings').update({ prices, updated_at: new Date().toISOString() }).eq('company_id', S.company);
   if (error) return alert(error.message);
   S.data.cfg.prices = prices; alert("Saqlandi. Sotuv summalari yangi narx bo'yicha qayta hisoblandi.");
 }
 async function saveCfg(e) {
   e.preventDefault();
   const patch = { min_call_seconds: +$('cfMin').value || 30, updated_at: new Date().toISOString() };
-  const { error } = await sbc.from('audit_settings').update(patch).eq('id', 1);
+  const { error } = await sbc.from('audit_settings').update(patch).eq('company_id', S.company);
   if (error) return alert(error.message);
   Object.assign(S.data.cfg, patch); alert('Saqlandi.');
 }
@@ -1396,7 +1398,7 @@ async function saveFx(e, auto) {
   const rate = +$('cfFx').value;
   if (!auto && !(rate > 0)) return alert("Kursni kiriting");
   const patch = auto ? { fx_manual: false } : { fx_rate: rate, fx_manual: true, fx_date: iso(new Date()) };
-  const { error } = await sbc.from('audit_settings').update(patch).eq('id', 1);
+  const { error } = await sbc.from('audit_settings').update(patch).eq('company_id', S.company);
   if (error) return alert(error.message);
   Object.assign(S.data.cfg, patch); render();
   alert(auto ? "Keyingi sinxronizatsiyada Markaziy bank kursi olinadi." : "Saqlandi: so'mdagi barcha hisoblar shu kursda.");
@@ -1405,7 +1407,7 @@ async function saveCapi(e) {
   e.preventDefault();
   const patch = { capi_dataset: $('cfDs').value.trim() || null, capi_enabled: $('cfCapi').checked };
   if (patch.capi_enabled && !patch.capi_dataset) return alert('Dataset ID kiriting');
-  const { error } = await sbc.from('audit_settings').update(patch).eq('id', 1);
+  const { error } = await sbc.from('audit_settings').update(patch).eq('company_id', S.company);
   if (error) return alert(error.message);
   Object.assign(S.data.cfg, patch); render();
 }
@@ -1826,7 +1828,7 @@ function economyPage() {
 }
 async function saveMonths(e) {
   e.preventDefault();
-  const v = +$('cfMonths').value || null, { error } = await sbc.from('audit_settings').update({ avg_months: v }).eq('id', 1);
+  const v = +$('cfMonths').value || null, { error } = await sbc.from('audit_settings').update({ avg_months: v }).eq('company_id', S.company);
   if (error) return alert(error.message);
   S.data.cfg.avg_months = v; render();
 }
@@ -2121,7 +2123,7 @@ function reportPage() {
   return `<div class="no-print">` + card(`<div class="flex flex-wrap items-center gap-3 mb-4">${segBtn([['campaign', 'Kampaniyalar'], ['adset', 'Ad setlar'], ['ad', "E'lonlar"]], R.level, "S.rep.level='$';render()")}${attrToggle()}<input value="${esc(R.q)}" placeholder="Nomi bo'yicha filtr…" onchange="S.rep.q=this.value;render()" class="h-9 px-3 rounded-xl bg-surface2 border border-line text-sm w-full sm:w-56"><button onclick="window.print()" class="h-9 px-4 rounded-xl bg-fg text-surface text-sm font-semibold ml-auto inline-flex items-center gap-1.5"><i class="ph-bold ph-file-pdf"></i>PDF yuklab olish</button></div>
     <div class="text-xs font-semibold mb-2">Ko'rsatkichlar</div><div>${colsAll.filter(c => !c.fixed).map(box).join('')}</div>
     <p class="text-[11px] text-muted mt-3">«PDF yuklab olish» → ochilgan oynada «Saqlash: PDF» ni tanlang. Davrni yuqoridagi kalendardan o'zgartiring.</p>`, 'mb-6') + `</div>` +
-    card(`<div class="flex flex-wrap items-end justify-between gap-3 mb-4"><div><div class="text-lg font-bold">Reklama hisoboti — Robbit akademiyasi</div><div class="text-xs text-muted">${fmtDay(S.from)} — ${fmtDay(S.to)} · ${{ campaign: 'kampaniyalar', adset: 'ad setlar', ad: "e'lonlar" }[R.level]} bo'yicha · ${(S.attr || 'last') === 'first' ? 'First click' : 'Last click'} · ${saleMode() ? 'sotuv sanasi' : 'lead sanasi'}</div></div><div class="text-xs text-muted">Tayyorlandi: ${new Date().toLocaleString('uz')}</div></div>
+    card(`<div class="flex flex-wrap items-end justify-between gap-3 mb-4"><div><div class="text-lg font-bold">Reklama hisoboti — ${esc(companyName())}</div><div class="text-xs text-muted">${fmtDay(S.from)} — ${fmtDay(S.to)} · ${{ campaign: 'kampaniyalar', adset: 'ad setlar', ad: "e'lonlar" }[R.level]} bo'yicha · ${(S.attr || 'last') === 'first' ? 'First click' : 'Last click'} · ${saleMode() ? 'sotuv sanasi' : 'lead sanasi'}</div></div><div class="text-xs text-muted">Tayyorlandi: ${new Date().toLocaleString('uz')}</div></div>
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">${kpiTile('Xarajat', adMoney(T.spend, false), '', 'blue')}${kpiTile('Lead (Bitrix)', num(T.leads), `sifatli ${num(T.qual)}`, 'violet')}${kpiTile('Sotuv', num(T.won), somMoney(T.revenue), 'green')}${kpiTile('ROAS', adM(T).roas == null ? '—' : adM(T).roas.toFixed(2) + '×', `foyda ${somMoney(adM(T).profit)}`, 'amber')}</div>` +
     table(cols, rows, T, 100000, true), 'print-area');
 }
@@ -2129,7 +2131,111 @@ function reportPage() {
 const salesAll = () => merged('m_sales', [['list', 'Sotuvlar ro\'yxati', 'ph-receipt', purchasesPage], ['when', "Sotuv qachon bo'ladi", 'ph-hourglass-medium', cohort], ['money', "To'lovlar va sikl", 'ph-wallet', moneyPage]]);
 const dailyAll = () => merged('m_daily', [['ch', 'Kunlar', 'ph-calendar-dots', daily], ['m', 'Kunlik metrikalar', 'ph-chart-bar', metricsPage]]);
 const teamAll = () => merged('m_team', [['m', 'Menejerlar', 'ph-users', managers], ['c', "Qo'ng'iroqlar", 'ph-phone', calls]]);
-const VIEWS = { purchases: salesAll, report: reportPage, integr: integrPage, mapping: mappingPage, geo: geoPage, economy: economyPage, tasks: tasksPage, overview, funnel, daily: dailyAll, leads, creatives, pains, managers: teamAll, speed: speedPage, branches: branchesPage, status: statusPage, guide: guidePage, briefs, ai, settings, users: usersPage };
+// ---------- Companies (super admin): who uses the platform and how each one is connected ----------
+const companyName = () => (S.companies || []).find(c => c.id === S.company)?.name || '';
+async function switchCompany(id) {
+  const { error } = await sbc.rpc('set_company', { c: id });
+  if (error) return alert(error.message);
+  Object.assign(S, { company: id, mapDraft: null, sec: {}, brF: '', source: '' });
+  refresh();
+}
+const BX_FIELDS = [['ad_id', "Lid: Meta reklama ID maydoni"], ['form_branch', "Lid: formada yozilgan filial"], ['course', 'Lid: kurs'], ['branch', 'Lid: filial'],
+  ['deal_branch', 'Deal: filial (ro\'yxat)'], ['paid', "Deal: to'langan summa"], ['first_paid', "Deal: birinchi to'lov sanasi"], ['lost_reason', "Deal: rad sababi (vergul bilan bir nechta)"]];
+function companiesPage() {
+  const list = S.data.companiesAll || [], sel = list.find(c => c.id === S.coSel);
+  const conn = v => v === 'vault' ? chip('Ulangan', 'success') : v === 'env' ? chip('Ulangan · eski sozlama', 'success') : chip('Ulanmagan', 'neutral');
+  const inp = (id, ph, val = '', type = 'text') => `<input id="${id}" type="${type}" value="${esc(val)}" placeholder="${esc(ph)}" autocomplete="off" class="w-full h-10 px-3 rounded-xl bg-surface2 border border-line text-sm">`;
+  const btn = (t, on, cls = 'bg-fg text-surface') => `<button type="button" onclick="${on}" class="h-10 px-4 rounded-xl ${cls} text-sm font-semibold whitespace-nowrap">${t}</button>`;
+  const head = card(h3('Kompaniyalar', "Platformadan foydalanadigan o'quv markazlari. Har biri faqat o'z ma'lumotini ko'radi; siz yuqoridagi tanlagich bilan istalganiga o'tasiz.") +
+    table([{ t: 'Kompaniya', f: c => `<b>${esc(c.name)}</b>${c.active ? '' : ' ' + chip("o'chiq", 'warn')}${c.id === S.company ? ' ' + chip('ochiq', 'info') : ''}` }, { t: 'Bitrix', f: c => conn(c.bitrix) }, { t: 'Meta', f: c => conn(c.meta) },
+      { t: 'Lidlar', r: 1, f: c => num(c.leads) }, { t: 'Adminlar', r: 1, f: c => num((c.admins || []).length) },
+      { t: 'Oxirgi sinxron', f: c => c.last_sync ? new Date(c.last_sync).toLocaleString('uz', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) + (c.sync_errors ? ' ' + chip('xato', 'danger') : '') : '—' },
+      { t: '', f: c => `<div class="flex gap-2 justify-end"><button onclick="S.coSel=${c.id};render()" class="text-xs font-semibold text-accent">Sozlash</button>${c.id === S.company ? '' : `<button onclick="switchCompany(${c.id})" class="text-xs font-semibold text-muted hover:text-fg">Ochish</button>`}</div>` }], list) +
+    `<div class="flex flex-wrap gap-2 mt-5 pt-5 border-t border-line"><div class="flex-1 min-w-[220px]">${inp('coName', "Yangi kompaniya nomi")}</div>${btn("Kompaniya qo'shish", 'addCompany()')}</div>`);
+  if (!sel) return head;
+  const f = sel.bitrix_fields || {};
+  const edit = card(h3(esc(sel.name), `Kompaniya #${sel.id} · ${num(sel.leads)} lid · ${num(sel.deals)} deal · ${num(sel.spend_days)} kunlik reklama ma'lumoti`) + `<div class="grid lg:grid-cols-2 gap-6">
+    <div class="space-y-5">
+      <div><div class="text-xs font-semibold mb-1.5">Nomi</div><div class="flex gap-2">${inp('coEditName', 'Nomi', sel.name)}${btn('Saqlash', `saveCompany(${sel.id})`, 'bg-surface2')}</div>
+        <label class="flex items-center gap-2 text-sm mt-2"><input type="checkbox" ${sel.active ? 'checked' : ''} onchange="setCompanyActive(${sel.id}, this.checked)"> Faol (o'chiq kompaniya sinxronlanmaydi)</label></div>
+      <div><div class="text-xs font-semibold mb-1.5">Bitrix24 webhook ${conn(sel.bitrix)}</div><div class="flex gap-2">${inp('coBx', sel.bitrix ? "Yangi webhook (eskisini almashtiradi)" : 'https://portal.bitrix24.kz/rest/1/xxxx/', '', 'password')}${btn('Saqlash', `saveSecret(${sel.id}, 'bitrix', 'coBx')`)}</div>
+        <p class="text-[11px] text-muted mt-1">Bitrix'da kiruvchi webhook: crm, user va telephony huquqlari bilan, faqat o'qish uchun ishlatiladi. Kalit yopiq omborda saqlanadi va bu yerda qayta ko'rsatilmaydi.</p></div>
+      <div><div class="text-xs font-semibold mb-1.5">Meta access token ${conn(sel.meta)}</div><div class="flex gap-2">${inp('coMeta', sel.meta ? 'Yangi token (eskisini almashtiradi)' : 'EAAG…', '', 'password')}${btn('Saqlash', `saveSecret(${sel.id}, 'meta', 'coMeta')`)}</div>
+        <p class="text-[11px] text-muted mt-1">ads_read huquqli System User token. Token ko'rgan barcha reklama hisoblari olinadi.</p></div>
+      <div><div class="text-xs font-semibold mb-1.5">Qo'shimcha reklama hisoblari (ixtiyoriy)</div><div class="flex gap-2">${inp('coAcc', 'act_123, act_456', (sel.meta_accounts || []).join(', '))}${btn('Saqlash', `saveIntegr(${sel.id})`, 'bg-surface2')}</div></div>
+    </div>
+    <div class="space-y-5">
+      <div><div class="text-xs font-semibold mb-1">Bitrix maydonlari</div><p class="text-[11px] text-muted mb-2">Har portalda maxsus maydon kodlari har xil (UF_CRM_…). Bo'sh qolsa, shu ko'rsatkich hisoblanmaydi.</p>
+        <div class="grid sm:grid-cols-2 gap-2">${BX_FIELDS.map(([k, t]) => `<label class="block"><span class="block text-[11px] text-muted mb-1">${t}</span><input data-bxf="${k}" value="${esc(Array.isArray(f[k]) ? f[k].join(', ') : f[k] || '')}" placeholder="UF_CRM_…" class="w-full h-9 px-2 rounded-lg bg-surface2 border border-line text-sm font-mono"></label>`).join('')}</div>
+        <div class="mt-2">${btn('Maydonlarni saqlash', `saveIntegr(${sel.id})`, 'bg-surface2')}</div></div>
+      <div><div class="text-xs font-semibold mb-2">Kompaniya adminlari</div>
+        ${(sel.admins || []).length ? `<div class="space-y-1.5 mb-3">${sel.admins.map(a => `<div class="flex items-center justify-between gap-2 rounded-xl bg-surface2 px-3 py-2 text-sm"><div class="min-w-0"><div class="font-semibold truncate">${esc(a.name || '—')}</div><div class="text-[11px] text-muted truncate">${esc(a.email || '')}</div></div><button onclick="removeCompanyAdmin('${esc(a.user_id)}')" class="text-xs text-danger shrink-0">O'chirish</button></div>`).join('')}</div>` : `<p class="text-xs text-muted mb-3">Hali admin yo'q.</p>`}
+        <form onsubmit="addCompanyAdmin(event, ${sel.id})" class="grid sm:grid-cols-2 gap-2"><input id="caName" required placeholder="Ism" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm"><input id="caEmail" type="email" required placeholder="Email" autocomplete="off" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm"><input id="caPass" type="password" required minlength="8" placeholder="Parol (kamida 8 belgi)" autocomplete="new-password" class="h-10 px-3 rounded-xl bg-surface2 border border-line text-sm"><button class="h-10 px-4 rounded-xl bg-fg text-surface text-sm font-semibold">Admin qo'shish</button></form>
+        <p class="text-[11px] text-muted mt-1">Admin shu email va parol bilan kiradi: faqat o'z kompaniyasining hisobotlari, sozlamalari va xodimlarini ko'radi.</p></div>
+    </div></div>
+    ${sel.sync_errors ? `<div class="mt-5 rounded-xl bg-danger/10 text-danger text-xs p-3 whitespace-pre-wrap break-all">${esc(sel.sync_errors)}</div>` : ''}
+    <div class="mt-5 pt-4 border-t border-line text-xs text-muted">Kalitlar saqlangandan keyin sinxronlash har soatda o'zi ishga tushadi. Birinchi yuklashdan so'ng shu kompaniyani ochib «Mapping» bo'limida statuslar va bosqichlarni belgilang (sifatli, sotuv va h.k.).</div>`);
+  return head + '<div class="h-6"></div>' + edit;
+}
+async function reloadCompanies() {
+  S.companies = (await sbc.from('companies').select('id,name,active').order('id')).data || [];
+  S.data.companiesAll = (await sbc.rpc('companies_overview')).data || [];
+  render();
+}
+async function addCompany() {
+  const name = $('coName').value.trim();
+  if (!name) return alert('Nomini kiriting');
+  const { data, error } = await sbc.from('companies').insert({ name }).select('id').single();
+  if (error) return alert(error.message);
+  S.coSel = data.id; reloadCompanies();
+}
+async function saveCompany(id) {
+  const name = $('coEditName').value.trim();
+  if (!name) return alert('Nomini kiriting');
+  const { error } = await sbc.from('companies').update({ name }).eq('id', id);
+  if (error) return alert(error.message);
+  reloadCompanies();
+}
+async function setCompanyActive(id, active) {
+  if (id === S.company && !active && !confirm("Hozir ochiq kompaniyani o'chiryapsiz. Davom etilsinmi?")) return render();
+  const { error } = await sbc.from('companies').update({ active }).eq('id', id);
+  if (error) return alert(error.message);
+  reloadCompanies();
+}
+async function saveSecret(id, kind, input) {
+  const value = $(input).value.trim();
+  if (!value) return alert('Qiymatni kiriting');
+  if (kind === 'bitrix' && !/^https:\/\/[^/]+\/rest\/\d+\/[^/]+\/?$/.test(value)) return alert("Webhook ko'rinishi: https://portal.bitrix24.kz/rest/1/kalit/");
+  const { error } = await sbc.rpc('set_company_secret', { c: id, kind, value });
+  $(input).value = '';
+  if (error) return alert(error.message);
+  alert("Saqlandi. Kalit yopiq omborda, sinxronlash keyingi soatda boshlanadi.");
+  reloadCompanies();
+}
+async function saveIntegr(id) {
+  const bitrix_fields = {};
+  for (const i of document.querySelectorAll('input[data-bxf]')) {
+    const v = i.value.trim(); if (!v) continue;
+    bitrix_fields[i.dataset.bxf] = i.dataset.bxf === 'lost_reason' ? v.split(',').map(x => x.trim()).filter(Boolean) : v;
+  }
+  const meta_accounts = $('coAcc').value.split(',').map(x => x.trim().replace(/^act_/, '')).filter(Boolean);
+  const { error } = await sbc.from('company_integrations').update({ bitrix_fields, meta_accounts, updated_at: new Date().toISOString() }).eq('company_id', id);
+  if (error) return alert(error.message);
+  alert('Saqlandi.'); reloadCompanies();
+}
+async function addCompanyAdmin(e, company_id) {
+  e.preventDefault();
+  try { await staffCall({ action: 'add_admin', company_id, name: $('caName').value.trim(), email: $('caEmail').value.trim(), password: $('caPass').value }); }
+  catch (err) { return alert('Xato: ' + err.message); }
+  reloadCompanies();
+}
+async function removeCompanyAdmin(user_id) {
+  if (!confirm("Bu adminning kirish huquqi o'chirilsinmi?")) return;
+  try { await staffCall({ action: 'remove_admin', user_id }); } catch (err) { return alert('Xato: ' + err.message); }
+  reloadCompanies();
+}
+
+const VIEWS = { companies: companiesPage, purchases: salesAll, report: reportPage, integr: integrPage, mapping: mappingPage, geo: geoPage, economy: economyPage, tasks: tasksPage, overview, funnel, daily: dailyAll, leads, creatives, pains, managers: teamAll, speed: speedPage, branches: branchesPage, status: statusPage, guide: guidePage, briefs, ai, settings, users: usersPage };
 function render() { $('app').innerHTML = shell(S.data.funnel ? VIEWS[S.page]() : card(empty('Yuklanmoqda…'))); }
 // Starts the Meta / Bitrix / call syncs now (sync-now waits up to ~55 s), then reloads the data.
 async function syncNow() {
@@ -2164,7 +2270,11 @@ async function login(e) {
 async function boot() {
   const { data } = await sbc.auth.getSession();
   if (!data.session) return loginScreen();
-  const { data: ok } = await sbc.rpc('is_admin');
+  const [{ data: ok }, { data: sup }, { data: cc }] = await Promise.all([sbc.rpc('is_company_admin'), sbc.rpc('is_admin'), sbc.rpc('current_company')]);
+  if (ok) {
+    S.super = !!sup; S.company = cc;
+    S.companies = (await sbc.from('companies').select('id,name,active').order('id')).data || [];
+  }
   if (!ok) {
     const { data: me } = await sbc.from('staff').select('*').eq('user_id', data.session.user.id).maybeSingle();
     if (me) return staffBoot(me);
