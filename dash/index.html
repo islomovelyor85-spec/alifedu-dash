@@ -177,7 +177,7 @@ const NAV = ADMIN ? [['', [['status', 'Holat', 'ph-pulse'], ['integr', 'Ulanishl
   ['Manbalar', [['daily', 'Kanallar va kunlar', 'ph-calendar-dots'], ['leads', 'Lead tahlili', 'ph-user-list']]],
   ['Sotuv va pul', [['purchases', 'Sotuvlar', 'ph-receipt'], ['economy', 'Iqtisodiyot', 'ph-coins']]],
   ['Marketing', [['creatives', 'Kreativlar', 'ph-film-strip'], ['geo', 'Lokatsiya isrofi', 'ph-map-pin'], ['briefs', 'Brieflar', 'ph-note-pencil'], ['report', 'Hisobot (PDF)', 'ph-file-pdf']]],
-  ['Jamoa', [['managers', "Menejerlar va qo'ng'iroqlar", 'ph-users'], ['pains', "Og'riqlar va e'tirozlar", 'ph-chat-circle-dots'], ['speed', 'Aloqa tezligi', 'ph-timer'], ['tasks', 'Vazifalar', 'ph-check-square']]],
+  ['Jamoa', [['managers', 'Menejerlar', 'ph-users'], ['pains', "Og'riqlar va e'tirozlar", 'ph-chat-circle-dots'], ['speed', 'Aloqa tezligi', 'ph-timer'], ['tasks', 'Vazifalar', 'ph-check-square']]],
   ['Yordam', [['ai', 'AI yordamchi', 'ph-sparkle'], ['guide', "Yo'riqnoma", 'ph-book-open']]],
 ];
 const PAGES = NAV.flatMap(([, items]) => items);
@@ -389,7 +389,7 @@ function overviewKpi(t) {
       ${kpi('Sotuv narxi', adMoney(div(spend, tSales.length)), `${adMoney(spend, false)} ÷ ${num(tSales.length)} ta Target sotuv`, 'green')}
       ${kpi('ROMI', pct(romi), fx ? `1-oy tushumi bo'yicha. ${months > 1 ? `${months} oy o'qisa: <b>${pct(romiLtv)}</b>` : ''}` : "kurs yo'q", 'violet')}
     </div>` : `<div class="mb-6 text-xs text-muted">Tanlangan davrda reklama xarajati yo'q.</div>`;
-  return `<div class="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-6">
+  return `<div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
       ${kpi('Jami leadlar', num(t.leads), `${fmtDay(S.from)}${S.from !== S.to ? ' — ' + fmtDay(S.to) : ''} · kuniga ~${num(t.leads / days)}`, 'violet', true)}
       ${kpi('Sifatli', num(t.qual), pct(div(t.qual, t.leads)) + ' leaddan', 'teal')}
       ${kpi('Sotuv', num(sold), wonStages || (saleMode() ? "shu davrda to'lov qilganlar" : 'shu davr leadlaridan'), 'green')}
@@ -411,7 +411,7 @@ function convBlock(t, allSold) {
   ];
   const tile = ([l, a, b, plan, hint]) => { const v = div(a, b), r = plan ? div(v, plan) : null;
     return `<div class="bg-surface rounded-3xl p-4"><div class="text-[11.5px] text-muted font-semibold">${l}</div><div class="text-[26px] font-bold tabular-nums mt-1" ${r != null ? `style="color:rgb(var(--c-${r >= 0.9 ? 'green' : r >= 0.7 ? 'amber' : 'rose'}))"` : ''}>${pct(v)}</div><div class="text-[11px] text-muted tabular-nums">${num(a)} / ${num(b)}${plan ? ` · reja ${pct(plan)}` : ''}</div><div class="text-[10.5px] text-muted mt-1 leading-snug">${hint}</div></div>`; };
-  return `<div class="flex items-baseline justify-between gap-3 mb-2"><h3 class="font-semibold">Konversiyalar</h3><span class="text-[11px] text-muted">Shu davrda kelgan leadlar ichida${saleMode() && allSold !== sold ? `: davrdagi ${num(allSold)} ta sotuvdan ${num(sold)} tasi shu leadlardan, qolgani oldingi oylar leadlaridan` : ''}</span></div><div class="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-6">${steps.map(tile).join('')}</div>`;
+  return `<div class="flex items-baseline justify-between gap-3 mb-2"><h3 class="font-semibold">Konversiyalar</h3><span class="text-[11px] text-muted">Shu davrda kelgan leadlar ichida${saleMode() && allSold !== sold ? `: davrdagi ${num(allSold)} ta sotuvdan ${num(sold)} tasi shu leadlardan, qolgani oldingi oylar leadlaridan` : ''}</span></div><div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">${steps.map(tile).join('')}</div>`;
 }
 
 // ---------- Plan: months of the selected range, each counted for the days it covers ----------
@@ -442,7 +442,7 @@ function planStrip(t, sold, spend) {
     const mSold = (S.data.purchases || []).filter(p => p.day >= mKey && p.day <= today).length, forecast = Math.round(mSold / elapsed * dim);
     fc = `<div class="rounded-2xl bg-surface2 p-3.5 text-[13px] mt-3"><b>${MONTH_FULL[+today.slice(5, 7) - 1]} prognozi:</b> shu tezlikda oy <b>${num(forecast)} ta sotuv</b> bilan tugaydi (reja ${num(+cur.sales)}, ${pct(div(forecast, +cur.sales))}).${forecast < +cur.sales && left ? ` Rejaga yetish uchun qolgan ${left} kunda kuniga <b>${num(Math.ceil((+cur.sales - mSold) / left))} ta</b> sotuv kerak (hozir kuniga ${(mSold / elapsed).toFixed(1)}).` : ''}</div>`;
   }
-  return `<div class="flex items-baseline justify-between gap-3 mb-2"><h3 class="font-semibold">Reja va fakt</h3><button onclick="${goSet}" class="text-[11.5px] text-accent font-semibold">Rejani o'zgartirish</button></div><div class="grid grid-cols-2 lg:grid-cols-5 gap-3">${planTile('Lead', t.leads, R.leads)}${planTile('Sifatli lead', t.qual, R.qual)}${planTile('Filialga keldi', t.came_to_branch, R.came)}${planTile('Sotuv', sold, R.sales)}${planTile('Reklama xarajati', spend, R.budget, v => adMoney(v, false))}</div>
+  return `<div class="flex items-baseline justify-between gap-3 mb-2"><h3 class="font-semibold">Reja va fakt</h3><button onclick="${goSet}" class="text-[11.5px] text-accent font-semibold">Rejani o'zgartirish</button></div><div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">${planTile('Lead', t.leads, R.leads)}${planTile('Sifatli lead', t.qual, R.qual)}${planTile('Filialga keldi', t.came_to_branch, R.came)}${planTile('Sotuv', sold, R.sales)}${planTile('Reklama xarajati', spend, R.budget, v => adMoney(v, false))}</div>
     <p class="text-[11px] text-muted mt-2">Reja tanlangan kunlarga bo'lingan (oy rejasi × kunlar ulushi).${miss ? ' ' + miss + " — u kunlar rejaga qo'shilmagan." : ''}</p>${fc}<div class="mb-6"></div>`;
 }
 function planWhy() {
