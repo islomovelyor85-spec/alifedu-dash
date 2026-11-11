@@ -175,12 +175,20 @@ const PAGES = NAV.flatMap(([, items]) => items);
 
 // Pages through results: the API returns at most 1000 rows per request.
 // A failing view is retried once, then left empty with a warning, so one slow query never blanks the whole platform.
+// At most 8 requests at a time, so one page load never floods the database;
+// a request with no answer in 25 s is cancelled and retried instead of hanging the page.
+const QMAX = 8; let qBusy = 0; const qWait = [];
+async function slot(fn) {
+  if (qBusy >= QMAX) await new Promise(r => qWait.push(r));
+  qBusy++;
+  try { return await fn(); } finally { qBusy--; qWait.shift()?.(); }
+}
 async function q(table, build = x => x, cols = '*') {
   for (let attempt = 0; ; attempt++) {
     const out = [];
     try {
       for (let from = 0; ; from += 1000) {
-        const { data, error } = await build(sbc.from(table).select(cols)).range(from, from + 999);
+        const { data, error } = await slot(() => build(sbc.from(table).select(cols)).range(from, from + 999).abortSignal(AbortSignal.timeout(25000)));
         if (error) throw new Error(error.message);
         out.push(...data);
         if (data.length < 1000) return out;
