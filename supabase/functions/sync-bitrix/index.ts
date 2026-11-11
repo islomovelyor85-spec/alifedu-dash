@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
       const isWon = won.length ? won.includes(r.STAGE_ID) : r.STAGE_SEMANTIC_ID === "S";
       const isLost = lost.length ? lost.includes(r.STAGE_ID) : r.STAGE_SEMANTIC_ID === "F";
       return {
-        bitrix_id: +r.ID, lead_id: +r.LEAD_ID || null, title: String(r.TITLE ?? "").trim().slice(0, 200) || null, stage: r.STAGE_ID, amount: +r.OPPORTUNITY || 0,
+        bitrix_id: +r.ID, lead_id: +r.LEAD_ID || null, title: String(r.TITLE ?? "").trim().slice(0, 200) || null, stage: r.STAGE_ID, bx_amount: +r.OPPORTUNITY || 0, // amount = course price by branch (DB trigger)
         created_at: r.DATE_CREATE, won_at: isWon ? (r.CLOSEDATE || r.DATE_MODIFY) : null,
         is_won: isWon, is_lost: isLost, manager_id: +r.ASSIGNED_BY_ID || null,
         paid_amount: parseFloat(String(r.UF_CRM_1690399614 ?? "").split("|")[0]) || 0,

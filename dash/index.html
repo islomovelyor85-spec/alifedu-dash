@@ -119,7 +119,7 @@ const groupSum = (rows, keyFn) => { const by = {}; for (const r of rows) { const
 
 const iso = d => new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
-const S = { page: ADMIN ? 'status' : 'overview', from: iso(addDays(new Date(), -29)), to: iso(new Date()), course: '', branch: '', data: {}, sort: {}, cal: null, source: '', ad: { status: 'active', level: 'ad', q: '', limit: 20 }, ai: [], aiBusy: false, menu: false, op: null, call: null, speedLimit: 300, syncing: false, warn: [] };
+const S = { page: ADMIN ? 'status' : 'overview', from: iso(addDays(new Date(), -29)), to: iso(new Date()), course: '', branch: '', data: {}, sort: {}, cal: null, source: '', ad: { status: 'all', level: 'ad', q: '', limit: 20 }, ai: [], aiBusy: false, menu: false, op: null, call: null, speedLimit: 300, syncing: false, warn: [] };
 // Quick ranges, like the Bitrix/ads date pickers.
 function quickRanges() {
   const t = new Date(), y = addDays(t, -1), m0 = new Date(t.getFullYear(), t.getMonth(), 1), m1 = new Date(t.getFullYear(), t.getMonth() + 1, 0),
@@ -173,11 +173,11 @@ function calendar() {
 }
 // Sidebar: every screen is listed directly, under a group title. Nothing is hidden behind a parent page.
 const NAV = ADMIN ? [['', [['status', 'Holat', 'ph-pulse'], ['integr', 'Ulanishlar', 'ph-plugs-connected'], ['mapping', 'Mapping', 'ph-sliders-horizontal'], ['settings', 'Sozlamalar', 'ph-gear'], ['users', 'Foydalanuvchilar', 'ph-user-gear']]]] : [
-  ['', [['overview', 'Umumiy', 'ph-squares-four'], ['plan', 'Reja va fakt', 'ph-target'], ['funnel', 'Voronka', 'ph-funnel'], ['branches', 'Filiallar', 'ph-buildings']]],
-  ['Manbalar', [['daily', 'Kunlar va kanallar', 'ph-calendar-dots'], ['metrics', 'Kunlik metrikalar', 'ph-chart-bar'], ['leads', 'Lead tahlili', 'ph-user-list']]],
-  ['Sotuv va pul', [['purchases', 'Sotuvlar', 'ph-receipt'], ['cohort', "Sotuv qachon bo'ladi", 'ph-hourglass-medium'], ['money', "To'lovlar va sikl", 'ph-wallet'], ['economy', 'Iqtisodiyot', 'ph-coins']]],
+  ['', [['overview', 'Umumiy', 'ph-squares-four'], ['funnel', 'Voronka', 'ph-funnel'], ['branches', 'Filiallar', 'ph-buildings']]],
+  ['Manbalar', [['daily', 'Kanallar va kunlar', 'ph-calendar-dots'], ['leads', 'Lead tahlili', 'ph-user-list']]],
+  ['Sotuv va pul', [['purchases', 'Sotuvlar', 'ph-receipt'], ['economy', 'Iqtisodiyot', 'ph-coins']]],
   ['Marketing', [['creatives', 'Kreativlar', 'ph-film-strip'], ['geo', 'Lokatsiya isrofi', 'ph-map-pin'], ['briefs', 'Brieflar', 'ph-note-pencil'], ['report', 'Hisobot (PDF)', 'ph-file-pdf']]],
-  ['Jamoa', [['managers', 'Menejerlar', 'ph-users'], ['calls', "Qo'ng'iroqlar", 'ph-phone'], ['pains', "Og'riqlar va e'tirozlar", 'ph-chat-circle-dots'], ['speed', 'Aloqa tezligi', 'ph-timer'], ['tasks', 'Vazifalar', 'ph-check-square']]],
+  ['Jamoa', [['managers', "Menejerlar va qo'ng'iroqlar", 'ph-users'], ['pains', "Og'riqlar va e'tirozlar", 'ph-chat-circle-dots'], ['speed', 'Aloqa tezligi', 'ph-timer'], ['tasks', 'Vazifalar', 'ph-check-square']]],
   ['Yordam', [['ai', 'AI yordamchi', 'ph-sparkle'], ['guide', "Yo'riqnoma", 'ph-book-open']]],
 ];
 const PAGES = NAV.flatMap(([, items]) => items);
@@ -269,10 +269,18 @@ const uniq = a => [...new Set(a.filter(Boolean))].sort();
 const match = r => (!S.course || r.course === S.course) && (!S.branch || r.branch === S.branch);
 
 // The plan compares a month, so it opens on the current month the first time.
+// Screens merged into another one keep working as links: they open the tab they moved into.
+const MOVED = { plan: ['overview', 'set', 'overview'], metrics: ['daily', 'm', 'm_daily'], cohort: ['purchases', 'when', 'm_sales'], money: ['purchases', 'money', 'm_sales'], calls: ['managers', 'c', 'm_team'] };
 function goPage(k) {
+  if (MOVED[k]) { const [page, tab, sec] = MOVED[k]; (S.sec ||= {})[sec] = tab; k = page; }
   Object.assign(S, { page: k, menu: false, op: null, call: null });
-  if (k === 'plan' && !S.planInit) { S.planInit = true; const t = new Date(); return setRange(iso(new Date(t.getFullYear(), t.getMonth(), 1)), iso(t)); }
   render(); scrollTo(0, 0);
+}
+// One screen made of several former ones: a row of big tabs above the content.
+function merged(id, items) {
+  S.sec ||= {};
+  const cur = items.find(i => i[0] === S.sec[id]) || items[0];
+  return `<div class="flex flex-wrap gap-2 mb-5">${items.map(([k, t, i]) => `<button onclick="S.sec['${id}']='${k}';S.call=null;S.op=null;render();scrollTo(0,0)" class="h-10 px-4 rounded-xl text-sm font-semibold inline-flex items-center gap-2 ${cur[0] === k ? 'bg-fg text-surface' : 'bg-surface text-muted hover:text-fg border border-line'}"><i class="ph-bold ${i}"></i>${t}</button>`).join('')}</div>` + cur[2]();
 }
 function shell(body) {
   const d = S.data, title = (PAGES.find(p => p[0] === S.page) || [])[1] || '';
@@ -300,11 +308,21 @@ function shell(body) {
           </div>
         </div>
       </header>
-      <div class="px-4 lg:px-8 py-6 max-w-[1400px]">${S.warn.length ? `<div class="mb-4 rounded-2xl border border-warn/40 bg-warn/10 text-[12.5px] p-3"><b>Ba'zi ma'lumotlar yuklanmadi</b> — «Yangilash»ni bosing. <span class="text-muted">${S.warn.map(esc).join(' · ')}</span></div>` : ''}${body}</div>
+      <div class="px-4 lg:px-8 py-6 max-w-[1400px]">${DATE_PAGES.includes(S.page) ? dateBar() : ''}${S.warn.length ? `<div class="mb-4 rounded-2xl border border-warn/40 bg-warn/10 text-[12.5px] p-3"><b>Ba'zi ma'lumotlar yuklanmadi</b> — «Yangilash»ni bosing. <span class="text-muted">${S.warn.map(esc).join(' · ')}</span></div>` : ''}${body}</div>
     </main>
   </div>`;
 }
-const SOURCE_PAGES = ['overview', 'cohort', 'speed'];
+const SOURCE_PAGES = ['overview', 'speed'];
+// Screens whose sale counts depend on the date rule; all of them read the same list (salesList), so a number is the same everywhere.
+const DATE_PAGES = ['overview', 'funnel', 'branches', 'daily', 'purchases', 'creatives', 'report'];
+const dateBar = () => `<div class="flex flex-wrap items-center gap-3 mb-5 text-[12px] text-muted">${dateToggle()}<span>${saleMode() ? "Sotuv — shu kunlarda to'lov qilganlar, lead qachon kelganidan qat'i nazar." : "Sotuv — faqat shu kunlarda kelgan leadlardan chiqqanlar."} Bu tanlov hamma sahifaga birdek ta'sir qiladi.</span></div>`;
+// Every sale of the period under the date rule (last click): by sale day, or by the day its lead came.
+function salesList(all) {
+  const bySale = saleMode();
+  return (S.data.purchases || []).map(p => ({ ...p, mday: bySale ? p.day : p.lead_day }))
+    .filter(p => p.mday && p.mday >= S.from && p.mday <= S.to && (all || !S.source || channelOf(p.source) === S.source));
+}
+const countBy = (list, keyFn) => { const m = {}; for (const p of list) { const k = keyFn(p); const o = m[k] ??= { n: 0, sum: 0 }; o.n++; o.sum += +p.amount || 0; } return m; };
 // Bitrix sources grouped into the channels people talk about; S.source holds a channel name.
 const CHANNELS = ['Target', 'Kiruvchi', 'Filialga tashrif', "Najot Ta'lim", 'Direct', 'Telegram', 'Web sayt', 'Kasb test', 'Boshqa', 'Eski / leadsiz'];
 function channelOf(src) {
@@ -334,7 +352,9 @@ function channelPills() {
 const segBtn = (items, cur, set) => `<div class="inline-flex p-1 bg-surface2 rounded-xl text-xs font-semibold">${items.map(([k, t]) => `<button onclick="${set.replace('$', k)}" class="px-3 h-7 rounded-lg ${cur === k ? 'bg-surface shadow-sm text-fg' : 'text-muted hover:text-fg'}">${t}</button>`).join('')}</div>`;
 // Which sales a screen counts: those closed in the period, or those from the period's leads.
 const saleMode = () => (S.dateMode || 'sale') === 'sale';
-const dateToggle = () => segBtn([['sale', 'Sotuv sanasi'], ['lead', 'Lid sanasi']], S.dateMode || 'sale', "S.dateMode='$';render()");
+const dateToggle = () => segBtn([['sale', 'Sotuv sanasi'], ['lead', 'Lid sanasi']], S.dateMode || 'sale', "setDateMode('$')");
+function setDateMode(m) { S.dateMode = m; try { localStorage.setItem('audit-datemode', m); } catch {} render(); }
+try { S.dateMode = localStorage.getItem('audit-datemode') || 'sale'; } catch {}
 
 const maxCpql = course => S.data.courses.find(c => c.course === course)?.max_cpql;
 
@@ -347,37 +367,90 @@ function overview() {
   const rows = bySource(S.data.daily);
   const t = groupSum(rows, () => 'all')[0];
   if (!t) return card(empty("Tanlangan davrda lead yo'q"));
+  return sections('overview', [['kpi', "Ko'rsatkichlar", () => overviewKpi(t)], ['why', 'Reja: sabab va harakat', planWhy], ['set', 'Rejani kiritish', planEditor]]);
+}
+function overviewKpi(t) {
   const kpi = (l, v, sub, color, hero) => `<div class="${hero ? 'hero' : 'bg-surface'} rounded-3xl p-5"><div class="text-[11px] font-semibold tracking-wide uppercase" style="color:rgb(var(--c-${color}))">${l}</div><div class="text-[28px] leading-tight font-bold mt-1 tabular-nums">${v}</div>${sub ? `<div class="text-[11px] text-muted mt-1">${sub}</div>` : ''}</div>`;
   const spend = S.data.spend.reduce((a, r) => a + +r.spend, 0), fx = +S.data.cfg?.fx_rate || 0;
   const paid = groupSum(S.data.daily.filter(r => r.source === 'Target'), () => 't')[0] || { leads: 0, qual: 0, won: 0, revenue: 0 };
   const metaLeads = S.data.spend.reduce((a, r) => a + +r.meta_leads, 0);
-  // Sales closed in the period (any lead month) — what the sales team counts as "this month's sales".
-  const won = bySource(S.data.wonDaily).reduce((a, r) => ({ n: a.n + +r.won, sum: a.sum + +r.amount }), { n: 0, sum: 0 });
+  const sales = salesList(), sold = sales.length, rev = sales.reduce((a, p) => a + (+p.amount || 0), 0);
   // A sale = deal now in To'lov qildi, Nabor guruh or Сделка успешна; show where they stand today.
-  const wonStage = {}; for (const r of bySource(S.data.wonDaily)) wonStage[r.stage] = (wonStage[r.stage] || 0) + +r.won;
-  const stageOrder = ["To'lov qildi", 'Nabor guruh', 'Сделка успешна'];
-  const wonStages = Object.entries(wonStage).sort((a, b) => (stageOrder.indexOf(a[0]) + 1 || 9) - (stageOrder.indexOf(b[0]) + 1 || 9))
-    .map(([k, n]) => `${esc(k)}: <b>${num(n)}</b>`).join(' · ');
-  const salesN = saleMode() ? won.n : t.won;
-  const wonTarget = S.data.wonDaily.filter(r => r.source === 'Target').reduce((a, r) => ({ n: a.n + +r.won, sum: a.sum + +r.amount }), { n: 0, sum: 0 });
-  const romi = fx && spend ? div(wonTarget.sum - spend * fx, spend * fx) : null;
+  const wonStage = countBy(sales, p => p.stage), stageOrder = ["To'lov qildi", 'Nabor guruh', 'Сделка успешна'];
+  const wonStages = Object.entries(wonStage).sort((a, b) => (stageOrder.indexOf(a[0]) + 1 || 9) - (stageOrder.indexOf(b[0]) + 1 || 9)).map(([k, o]) => `${esc(k)}: <b>${num(o.n)}</b>`).join(' · ');
+  const tSales = salesList(true).filter(p => channelOf(p.source) === 'Target'), tRev = tSales.reduce((a, p) => a + (+p.amount || 0), 0);
+  const romi = fx && spend ? div(tRev - spend * fx, spend * fx) : null;
+  const days = Math.round((new Date(S.to) - new Date(S.from)) / 864e5) + 1;
   const adKpis = spend ? `<div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
       ${kpi('Reklama xarajati', adMoney(spend), `Meta · ${num(metaLeads)} natija (Results)`, 'amber')}
       ${kpi('Lead narxi', adMoney(div(spend, paid.leads)), `Target: ${num(paid.leads)} lead Bitrix'da`, 'blue')}
-      ${kpi('CPQL', adMoney(div(spend, paid.qual)), `sifatli lead narxi · ${num(paid.qual)} ta`, 'teal')}
-      ${kpi('Sotuv narxi', adMoney(div(spend, salesN)), `${adMoney(spend, false)} ÷ ${num(salesN)} ta sotuv${S.source ? ` (${esc(S.source)})` : ' (barcha kanallar)'}`, 'green')}
-      ${kpi('ROMI', pct(romi), fx ? `tushum ${moneyShortTop(wonTarget.sum)} so'm · kurs ${num(fx)}` : 'kurs yo\'q', 'violet')}
-    </div>` : '';
-  const days = Math.round((new Date(S.to) - new Date(S.from)) / 864e5) + 1;
-  return `<div class="flex flex-wrap items-center gap-3 mb-4">${segBtn([['', 'Marketing (hammasi)'], ['Target', 'Target']], S.source === 'Target' ? 'Target' : '', "S.source='$';render()")}${dateToggle()}<span class="text-[11px] text-muted">${saleMode() ? "Sotuv — shu davrda yopilgan barcha sotuvlar" : "Sotuv — faqat shu davrda kelgan leadlardan"}</span></div>` + sections('overview', [['kpi', "Ko'rsatkichlar", () => `<div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
+      ${kpi('Sifatli lead narxi', adMoney(div(spend, paid.qual)), `${num(paid.qual)} ta sifatli Target lead`, 'teal')}
+      ${kpi('Sotuv narxi', adMoney(div(spend, tSales.length)), `${adMoney(spend, false)} ÷ ${num(tSales.length)} ta Target sotuv`, 'green')}
+      ${kpi('ROMI', pct(romi), fx ? `Target tushumi ${moneyShortTop(tRev)} so'm, xarajat ${moneyShortTop(spend * fx)} so'm` : "kurs yo'q", 'violet')}
+    </div>` : `<div class="mb-6 text-xs text-muted">Tanlangan davrda reklama xarajati yo'q.</div>`;
+  return `<div class="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-6">
       ${kpi('Jami leadlar', num(t.leads), `${fmtDay(S.from)}${S.from !== S.to ? ' — ' + fmtDay(S.to) : ''} · kuniga ~${num(t.leads / days)}`, 'violet', true)}
       ${kpi('Sifatli', num(t.qual), pct(div(t.qual, t.leads)) + ' leaddan', 'teal')}
-      ${kpi('Sotuv', num(salesN), saleMode() ? `${wonStages ? wonStages + '<br>' : ''}shu davrda sotuvga o'tgan · ${num(t.won)} tasi shu davr leadlaridan` : `shu davr leadlaridan · davrda jami ${num(won.n)} ta sotuv yopilgan`, 'green')}
-      ${kpi('Jarayonda', num(t.in_progress), 'hali hal bo\'lmagan', 'amber')}
+      ${kpi('Sotuv', num(sold), wonStages || (saleMode() ? "shu davrda to'lov qilganlar" : 'shu davr leadlaridan'), 'green')}
+      ${kpi('Tushum (1-oy)', somMoney(rev), "Xadra, Chimboy — 1 mln, viloyatlar — 700 ming so'm", 'green')}
+      ${kpi('Jarayonda', num(t.in_progress), "hali hal bo'lmagan", 'amber')}
       ${kpi('Sifatsiz', num(t.junk), pct(div(t.junk, t.leads)) + ' leaddan', 'crimson')}
-    </div>` +
-    rings([['Aloqa', div(t.contacted, t.leads), 'blue'], ['Sifatli', div(t.qual, t.leads), 'teal'], ['Deal', div(t.deals, t.leads), 'violet'], ['Filialga keldi', div(t.came_to_branch, t.leads), 'amber'], ['Sotuv', div(t.won, t.leads), 'green'], ['Sifatsiz', div(t.junk, t.leads), 'rose']], 'Jami leadlardan qanchasi qayergacha borgan') +
-    (spend ? adKpis : `<div class="mb-6 text-xs text-muted">Tanlangan davrda reklama xarajati yo'q.</div>`)], ['ch', 'Kanallar', () => channelTable(rows, S.data.wonDaily)]]);
+    </div>` + planStrip(t, sold, spend) + convBlock(t, sold) + adKpis;
+}
+// Step-by-step conversions; the sale steps use the same sale count as the Sotuv card.
+function convBlock(t, sold) {
+  const R = planRange(), p = R.p;
+  const steps = [
+    ['Lead → aloqa', t.contacted, t.leads, null, "Qo'ng'iroq qilib gaplashilgan leadlar"],
+    ['Lead → sifatli', t.qual, t.leads, p && +p.lead_qual, 'Bitrix statusi «sifatli»'],
+    ['Sifatli → filialga keldi', t.came_to_branch, t.qual, p && +p.qual_came, 'Sinov darsiga kelganlar'],
+    ['Filialga keldi → sotuv', sold, t.came_to_branch, p && +p.came_sale, "Kelganlardan to'lov qilganlar"],
+    ['Sifatli → sotuv', sold, t.qual, p && +p.qual_came * +p.came_sale, 'Har 100 sifatli leaddan nechtasi sotuv'],
+    ['Lead → sotuv (umumiy)', sold, t.leads, p && +p.lead_qual * +p.qual_came * +p.came_sale, 'Har 100 leaddan nechtasi sotuv'],
+  ];
+  const tile = ([l, a, b, plan, hint]) => { const v = div(a, b), r = plan ? div(v, plan) : null;
+    return `<div class="bg-surface rounded-3xl p-4"><div class="text-[11.5px] text-muted font-semibold">${l}</div><div class="text-[26px] font-bold tabular-nums mt-1" ${r != null ? `style="color:rgb(var(--c-${r >= 0.9 ? 'green' : r >= 0.7 ? 'amber' : 'rose'}))"` : ''}>${pct(v)}</div><div class="text-[11px] text-muted tabular-nums">${num(a)} / ${num(b)}${plan ? ` · reja ${pct(plan)}` : ''}</div><div class="text-[10.5px] text-muted mt-1 leading-snug">${hint}</div></div>`; };
+  return `<div class="flex items-baseline justify-between gap-3 mb-2"><h3 class="font-semibold">Konversiyalar</h3><span class="text-[11px] text-muted">${saleMode() ? "Sotuvga oid foizlar — davrdagi sotuvlar ÷ davrdagi leadlar" : "Hammasi — shu davr leadlari ichida"}</span></div><div class="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-6">${steps.map(tile).join('')}</div>`;
+}
+
+// ---------- Plan: months of the selected range, each counted for the days it covers ----------
+const monthName = key => `${MONTH_FULL[+key.slice(5, 7) - 1]} ${key.slice(0, 4)}`;
+function planRange(from = S.from, to = S.to) {
+  const R = { leads: 0, qual: 0, came: 0, sales: 0, budget: 0, months: [], missing: [], p: null };
+  for (let m = new Date(from.slice(0, 7) + '-01T00:00'); iso(m) <= to; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) {
+    const key = iso(m), dim = new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate(), last = iso(new Date(m.getFullYear(), m.getMonth(), dim));
+    const a = key < from ? from : key, b = last > to ? to : last, scale = (Math.round((new Date(b) - new Date(a)) / 864e5) + 1) / dim;
+    const p = S.data.plans.find(x => x.month === key);
+    R.months.push({ key, p, scale, dim });
+    if (!p || !+p.sales) { R.missing.push(key); continue; }
+    const n = planNeed(p); R.leads += n.leads * scale; R.qual += n.qual * scale; R.came += n.came * scale; R.sales += n.sales * scale; R.budget += n.budget * scale; R.p = p;
+  }
+  R.has = !!R.p;
+  return R;
+}
+const planTile = (l, fact, plan, f = num) => { const r = div(fact, plan); return `<div class="bg-surface rounded-3xl p-5"><div class="flex justify-between items-baseline"><span class="text-xs text-muted">${l}</span>${plan ? `<span class="text-xs font-semibold tabular-nums">${pct(r)}</span>` : ''}</div><div class="text-[26px] font-bold tabular-nums mt-1">${f(fact)}</div><div class="text-[11px] text-muted">reja ${plan ? f(plan) : '—'}</div><div class="mt-2 h-1.5 rounded-full bg-surface2 overflow-hidden"><div class="h-full rounded-full" style="width:${Math.min((r || 0) * 100, 100).toFixed(1)}%;background:rgb(var(--c-${r >= 0.9 ? 'green' : r >= 0.7 ? 'amber' : 'rose'}))"></div></div></div>`; };
+function planStrip(t, sold, spend) {
+  const R = planRange(), goSet = `S.sec.overview='set';S.planMonth='${(R.missing[R.missing.length - 1] || S.to).slice(0, 7)}';render()`;
+  const miss = R.missing.length ? `${R.missing.map(monthName).join(', ')} uchun reja kiritilmagan` : '';
+  if (!R.has) return card(`<div class="flex flex-wrap items-center justify-between gap-3"><div><div class="font-semibold">Reja va fakt</div><div class="text-xs text-muted mt-0.5">${miss}. Reja kiritilsa, bu yerda har bir ko'rsatkich rejaga solishtiriladi.</div></div><button onclick="${goSet}" class="h-10 px-4 rounded-xl bg-fg text-surface text-sm font-semibold">Rejani kiritish</button></div>`, 'mb-6');
+  // Month forecast: only when the range ends today, sales counted by sale date.
+  const today = iso(new Date()), mKey = today.slice(0, 7) + '-01', cur = S.data.plans.find(x => x.month === mKey);
+  let fc = '';
+  if (S.to === today && cur && +cur.sales) {
+    const elapsed = +today.slice(8), dim = new Date(+today.slice(0, 4), +today.slice(5, 7), 0).getDate(), left = dim - elapsed;
+    const mSold = (S.data.purchases || []).filter(p => p.day >= mKey && p.day <= today).length, forecast = Math.round(mSold / elapsed * dim);
+    fc = `<div class="rounded-2xl bg-surface2 p-3.5 text-[13px] mt-3"><b>${MONTH_FULL[+today.slice(5, 7) - 1]} prognozi:</b> shu tezlikda oy <b>${num(forecast)} ta sotuv</b> bilan tugaydi (reja ${num(+cur.sales)}, ${pct(div(forecast, +cur.sales))}).${forecast < +cur.sales && left ? ` Rejaga yetish uchun qolgan ${left} kunda kuniga <b>${num(Math.ceil((+cur.sales - mSold) / left))} ta</b> sotuv kerak (hozir kuniga ${(mSold / elapsed).toFixed(1)}).` : ''}</div>`;
+  }
+  return `<div class="flex items-baseline justify-between gap-3 mb-2"><h3 class="font-semibold">Reja va fakt</h3><button onclick="${goSet}" class="text-[11.5px] text-accent font-semibold">Rejani o'zgartirish</button></div><div class="grid grid-cols-2 lg:grid-cols-5 gap-3">${planTile('Lead', t.leads, R.leads)}${planTile('Sifatli lead', t.qual, R.qual)}${planTile('Filialga keldi', t.came_to_branch, R.came)}${planTile('Sotuv', sold, R.sales)}${planTile('Reklama xarajati', spend, R.budget, v => adMoney(v, false))}</div>
+    <p class="text-[11px] text-muted mt-2">Reja tanlangan kunlarga bo'lingan (oy rejasi × kunlar ulushi).${miss ? ' ' + miss + " — u kunlar rejaga qo'shilmagan." : ''}</p>${fc}<div class="mb-6"></div>`;
+}
+function planWhy() {
+  const R = planRange();
+  if (!R.has) return card(empty('Avval rejani kiriting'));
+  const [t = { leads: 0, qual: 0, came_to_branch: 0, won: 0, in_progress: 0 }] = groupSum(S.data.daily, () => 'all');
+  const causes = planCauses(R.p, t, salesList(true).length, { leads: R.leads }, 1);
+  const tone = { danger: 'border-danger/40 bg-danger/10', warn: 'border-warn/40 bg-warn/10', success: 'border-success/40 bg-success/10' };
+  return card(h3('Nega orqadamiz va nima qilish kerak', 'Tanlangan davr raqamlaridan avtomatik') + (causes.length ? `<div class="grid lg:grid-cols-2 gap-3">${causes.map(c => `<div class="rounded-2xl border ${tone[c.tone]} p-4"><div class="font-semibold text-[13.5px]">${c.title}</div><div class="text-[13px] mt-1">${c.msg}</div>${c.action ? `<div class="text-[13px] mt-1.5 font-medium"><i class="ph-bold ph-arrow-right"></i> ${c.action}</div>` : ''}</div>`).join('')}</div>` : empty("Katta og'ish topilmadi")), 'mb-6');
 }
 
 // Channels on the overview: every sale lands in a row, so the footer equals the Sotuv card.
@@ -560,9 +633,9 @@ function wonGap(cohort, all) {
 function funnel() {
   const rows = bySource(S.data.sales.filter(match));
   const [t] = sumBy(rows, () => 'all');
-  const toolbar = `<div class="flex flex-wrap items-center justify-between gap-3 mb-4">${channelPills()}${dateToggle()}</div>`;
+  const toolbar = `<div class="flex flex-wrap items-center justify-between gap-3 mb-4">${channelPills()}</div>`;
   if (!t) return toolbar + card(empty("Bu kanalda lead yo'q"));
-  const allWon = bySource(S.data.wonDaily).reduce((a, r) => a + +r.won, 0), byDate = saleMode(), wonCaption = byDate ? "Shu davrda sotuvga o'tgan barcha deallar" : "Shu davr leadlaridan sotuvga aylanganlar";
+  const allWon = salesList().length, byDate = saleMode(), wonCaption = byDate ? "Shu davrda sotuvga o'tgan barcha deallar" : "Shu davr leadlaridan sotuvga aylanganlar";
   // Widths follow the square root of the share so the small bottom steps stay readable; exact numbers are printed.
   const COLORS = ['blue', 'violet', 'teal', 'violet', 'amber', 'green'];
   const bars = STEPS.map(([s, l], i) => {
@@ -676,6 +749,11 @@ function daily() {
   if (!rows.length) return card(empty("Tanlangan davrda lead yo'q"));
   const bySrc = groupSum(rows, r => channelOf(r.source)).sort((a, b) => b.leads - a.leads);
   const [tot] = groupSum(rows, () => 'all');
+  // Sales come from the same list as every other screen (date rule in the bar above).
+  const soldCh = countBy(salesList(true), p => channelOf(p.source));
+  for (const o of bySrc) o.won = soldCh[o.key]?.n || 0;
+  for (const k in soldCh) if (!bySrc.some(o => o.key === k)) bySrc.push({ key: k, ...Object.fromEntries(OUT.map(([x]) => [x, 0])), revenue: 0, won: soldCh[k].n });
+  tot.won = salesList(true).length;
   const view = S.dailyView || 'src', picked = S.source;
   const rate = (o, k) => div(o[k], o.leads);
   // Findings only from sources with enough leads to mean something.
@@ -701,6 +779,7 @@ function daily() {
   const body = view === 'src'
     ? table(cols('Kanal', r => `<button data-c="${esc(r.key)}" onclick="S.source=this.dataset.c;S.dailyView='day';render()" class="font-semibold hover:text-accent text-left">${esc(r.key)}</button>`), bySrc, tot)
     : (() => { const ds = groupSum(bySource(rows), r => r.day).sort((a, b) => b.key.localeCompare(a.key)); const [t2] = groupSum(bySource(rows), () => 'all');
+      const soldDay = countBy(salesList(), p => p.mday); for (const o of ds) o.won = soldDay[o.key]?.n || 0; if (t2) t2.won = salesList().length;
       return table(cols('Sana', r => `<span class="font-semibold tabular-nums">${r.key.slice(8)}.${r.key.slice(5, 7)}</span> <span class="text-xs text-muted">${WD[new Date(r.key + 'T00:00').getDay()]}</span>`), ds, t2); })();
   return card(`<div class="flex flex-wrap items-center gap-3 mb-4">${seg}${view === 'day' ? srcSelect : ''}</div>` +
     h3(view === 'src' ? 'Kanallar: qaysi kanal sifatli lead va sotuv beradi' : `Kunlar${picked ? ' — ' + esc(picked) : ''}: qaysi kun leadlari yaxshi ishlandi`,
@@ -811,7 +890,7 @@ function managers() {
     { t: 'Ball (100)', r: 1, f: r => scoreChip(r.total == null ? null : Math.round(r.total)) },
     ...RUBRIC.map(([st, t]) => ({ t, r: 1, f: r => r.stages[st] == null ? '—' : `<span class="tabular-nums">${Math.round(r.stages[st])}</span>` })),
     { t: 'Zaif bosqich', f: weakest },
-  ], rows))], ['r', 'Reglament', () => rubricCard()]]);
+  ], rows))]]);
 }
 
 function managerDetail() {
@@ -908,14 +987,9 @@ function calls() {
   let shown = F.type === 'sotuv' ? sales : ok;
   if (F.low) shown = shown.filter(c => c.total != null && c.total < 50);
   const seg = (items, cur, set) => `<div class="inline-flex p-1 bg-surface2 rounded-xl text-xs font-semibold">${items.map(([k, t]) => `<button onclick="${set.replace('$', k)}" class="px-3 h-7 rounded-lg ${cur === k ? 'bg-surface shadow-sm text-fg' : 'text-muted hover:text-fg'}">${t}</button>`).join('')}</div>`;
-  return sections('calls', [['sum', 'Xulosa', () => `<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">${kpiTile("Sotuv qo'ng'iroqlari", num(sales.length), `${num(ok.length)} ta tahlildan · eslatma/xizmat ballga kirmaydi${queued ? ` · ${num(queued)} navbatda` : ''}${failed ? ` · ${num(failed)} xato` : ''}`, 'blue')}${kpiTile("O'rtacha ball", avgOf(sales, c => c.total)?.toFixed(0) ?? '—', '100 ballik reglament · 75+ yaxshi', 'amber')}${kpiTile('Sinov darsiga yozildi', pct(div(booked, sales.length)), `${num(booked)} ta sotuv qo'ng'irog'idan`, 'green')}${kpiTile('Jamoaning zaif bosqichi', weakest ? esc(weakest.t) : '—', weakest ? `o'rtacha ${Math.round(weakest.v)} / 100` : '', 'rose')}</div>
-  <div class="grid lg:grid-cols-2 gap-4 mb-6">
+  return sections('calls', [['sum', 'Xulosa', () => `<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">${kpiTile("Sotuv qo'ng'iroqlari", num(sales.length), `${num(all.length)} ta qo'ng'iroqdan ${num(ok.length)} tasi (${pct(div(ok.length, all.length))}) AI tahlil qilgan — bepul limit tufayli qisman · eslatma/xizmat ballga kirmaydi${queued ? ` · ${num(queued)} navbatda` : ''}${failed ? ` · ${num(failed)} xato` : ''}`, 'blue')}${kpiTile("O'rtacha ball", avgOf(sales, c => c.total)?.toFixed(0) ?? '—', '100 ballik reglament · 75+ yaxshi', 'amber')}${kpiTile('Sinov darsiga yozildi', pct(div(booked, sales.length)), `${num(booked)} ta sotuv qo'ng'irog'idan`, 'green')}${kpiTile('Jamoaning zaif bosqichi', weakest ? esc(weakest.t) : '—', weakest ? `o'rtacha ${Math.round(weakest.v)} / 100` : '', 'rose')}</div>
+  <div class="mb-6">
     ${card(h3('Jamoa qayerda ball yo\'qotyapti', "Skript bosqichlari bo'yicha o'rtacha (100 ga keltirilgan). Eng qisqa chiziq — birinchi navbatda o'rgatish kerak bo'lgan bosqich.") + (stages.length ? stages.map(x => `<div class="flex items-center justify-between gap-3 py-1.5 text-[13px]"><span class="w-44 shrink-0">${x.t}</span>${bar(x.v, 100, x.v >= 75 ? 'green' : x.v >= 50 ? 'amber' : 'rose', Math.round(x.v))}</div>`).join('') : empty("Sotuv qo'ng'irog'i yo'q")))}
-    ${card(h3('Menejerlar', "Eng past balldan boshlab. Ismni bosing — uning qo'ng'iroqlari va xatolari.") + (mgrs.length ? table([
-      { t: 'Menejer', f: r => `<button ${go(r.key)} class="font-semibold text-left hover:text-accent">${esc(r.name)}</button>` },
-      { t: "Qo'ng'iroq", r: 1, s: r => r.sales.length, f: r => num(r.sales.length) }, { t: 'Ball', r: 1, s: r => r.total ?? -1, f: r => scoreChip(r.total == null ? null : Math.round(r.total)) },
-      { t: 'Yozildi', r: 1, s: r => r.booked ?? -1, f: r => pct(r.booked) }, { t: 'Zaif bosqich', f: r => esc(weakStage(r)) },
-    ], mgrs) : empty("Ma'lumot yo'q")))}
   </div>
 `], ['err', "Xato va e'tirozlar", () => `<div class="grid lg:grid-cols-2 gap-4 mb-6">${list('Operator xatolari', "Sotuv qo'ng'iroqlarida eng ko'p takrorlanadigan — o'quv mavzusi", top(sales, 'mistakes'), 'amber')}${list("Mijoz e'tirozlari", "Eng ko'p eshitilgan — skriptda javobi bo'lishi kerak", top(sales, 'objections'), 'rose')}</div>
 `], ['list', "Qo'ng'iroqlar", () => `${card(`<div class="flex flex-wrap items-center gap-3 mb-3">${seg([['sotuv', 'Sotuv'], ['all', 'Hammasi']], F.type, "S.callF.type='$';render()")}<label class="inline-flex items-center gap-2 text-sm"><input type="checkbox" ${F.low ? 'checked' : ''} onchange="S.callF.low=this.checked;render()"> Faqat past ball (&lt;50)</label><span class="text-xs text-muted ml-auto">Qatorni bosing — yozuv, xatolar va dialog · ${num(shown.length)} ta</span></div>` + callList([...shown].sort((a, b) => String(b.call_start).localeCompare(String(a.call_start)))), 'mb-6')}
@@ -971,12 +1045,24 @@ function settings() {
         <label><span class="text-[11px] text-muted">Ulush</span><input name="ad_share" value="${k.ad_share}" class="w-full h-9 px-2 rounded-lg bg-surface2 border border-line"></label>
         <label><span class="text-[11px] text-muted">Q→S${k.qual_to_sale_manual ? '' : ' (avto)'}</span><input name="qual_to_sale" value="${(+k.qual_to_sale).toFixed(3)}" class="w-full h-9 px-2 rounded-lg bg-surface2 border border-line"></label>
       </div>`).join('')}<button onclick="saveCourses()" class="h-10 px-4 rounded-xl bg-fg text-surface text-sm font-semibold">Kurslarni saqlash</button></div>` : empty("Kurslar birinchi sinxronizatsiyadan keyin paydo bo'ladi")))}
+    ${(() => { const pr = c.prices || { default: 700000 }, brs = uniq([...Object.keys(pr).filter(k => k !== 'default'), ...(S.data.brDaily || []).map(r => r.branch).filter(b => b && !/^NOMA/.test(b))]);
+      return card(h3("Kurs narxi (1 oylik to'lov)", "Sotuv tushumi, ROMI, foyda va iqtisodiyot shu narxdan hisoblanadi: har bir sotuv = filialning 1 oylik narxi. Bo'sh qoldirilgan filial — umumiy narxda. O'zgartirsangiz, barcha sotuvlar qayta hisoblanadi.") + `<form onsubmit="savePrices(event)" class="space-y-3"><label class="block"><span class="block text-xs font-semibold mb-1.5">Umumiy narx (viloyatlar), so'm</span><input id="prDefault" type="number" min="0" step="1000" value="${+pr.default || 0}" class="w-full h-10 px-3 rounded-xl bg-surface2 border border-line text-sm"></label>
+        <div class="grid grid-cols-2 gap-2">${brs.map(b => `<label class="block"><span class="block text-[11px] text-muted mb-1">${esc(b)}</span><input data-price="${esc(b)}" type="number" min="0" step="1000" value="${pr[b] ?? ''}" placeholder="${num(+pr.default || 0)}" class="w-full h-9 px-2 rounded-lg bg-surface2 border border-line text-sm"></label>`).join('')}</div>
+        <button class="h-10 px-4 rounded-xl bg-fg text-surface text-sm font-semibold">Narxlarni saqlash</button></form>`); })()}
     ${card(h3('Conversions API (Meta)', "Sifatli lead va sotuvni Meta'ga qaytaradi. Faqat Target leadlar, telefon xeshlangan holda yuboriladi va saqlanmaydi.") + `<form onsubmit="saveCapi(event)" class="space-y-3"><label class="block"><span class="block text-xs font-semibold mb-1.5">Dataset (Pixel) ID</span><input id="cfDs" value="${esc(c.capi_dataset || '')}" class="w-full h-10 px-3 rounded-xl bg-surface2 border border-line text-sm"></label><label class="flex items-center gap-2 text-sm"><input id="cfCapi" type="checkbox" ${c.capi_enabled ? 'checked' : ''}> Yuborishni yoqish</label><button class="h-10 px-4 rounded-xl bg-fg text-surface text-sm font-semibold">Saqlash</button></form><p class="text-[11px] text-muted mt-2">Yuborildi: ${num((S.data.capi || []).filter(x => x.sent_at).length)} · xato: ${num((S.data.capi || []).filter(x => x.error).length)}</p>`)}
     ${card(h3('Sinxronizatsiya') + (S.data.sync.length ? table([{ t: 'Manba', f: s => esc(s.source) }, { t: 'Holat', f: st }, { t: 'Oxirgi', f: s => s.last_run_at ? new Date(s.last_run_at).toLocaleString('uz') : '—' }], S.data.sync) + S.data.sync.filter(s => s.last_error).map(s => `<p class="text-xs text-danger mt-2 break-all">${esc(s.source)}: ${esc(s.last_error)}</p>`).join('') : empty("Hali ishga tushmagan — Edge Function secret'larini qo'ying")))}
     </div></div>`;
 }
 
 const list = id => $(id).value.split(',').map(s => s.trim()).filter(Boolean);
+async function savePrices(e) {
+  e.preventDefault();
+  const prices = { default: +$('prDefault').value || 0 };
+  for (const i of document.querySelectorAll('input[data-price]')) if (i.value !== '' && +i.value > 0) prices[i.dataset.price] = +i.value;
+  const { error } = await sbc.from('audit_settings').update({ prices, updated_at: new Date().toISOString() }).eq('id', 1);
+  if (error) return alert(error.message);
+  S.data.cfg.prices = prices; alert("Saqlandi. Sotuv summalari yangi narx bo'yicha qayta hisoblandi.");
+}
 async function saveCfg(e) {
   e.preventDefault();
   const patch = { min_call_seconds: +$('cfMin').value || 30, updated_at: new Date().toISOString() };
@@ -1109,6 +1195,8 @@ function branchesPage() {
   for (const r of lead) { const o = row(r.branch); for (const k of ['leads', 'qual', 'unreachable', 'came', 'paid', 'won', 'revenue']) o[k] += +r[k] || 0;
     if (isT(r)) { o.t_leads += +r.leads; o.t_qual += +r.qual; o.t_unr += +r.unreachable; o.t_won += +r.won; } }
   for (const r of spend) { const o = row(r.branch); for (const k of ['spend', 'impressions', 'clicks', 'meta_leads']) o[k] += +r[k] || 0; }
+  for (const o of Object.values(by)) { o.won = 0; o.t_won = 0; o.revenue = 0; }
+  for (const p of salesList(true)) { const o = row(p.branch || "NOMA'LUM"); o.won++; o.revenue += +p.amount || 0; if (channelOf(p.source) === 'Target') o.t_won++; }
   const UNK = "NOMA'LUM", rows = Object.values(by).sort((a, b) => (a.branch === UNK) - (b.branch === UNK) || b.leads - a.leads);
   const tot = rows.reduce((t, o) => { for (const k in o) if (k !== 'branch') t[k] = (t[k] || 0) + o[k]; return t; }, { _foot: true });
   const known = rows.filter(o => o.branch !== UNK);
@@ -1329,53 +1417,48 @@ function planCauses(p, t, sold, need, scale) {
   if (ops.length > 1 && ops[ops.length - 1].r > ops[0].r * 1.5) push('warn', 'Operatorlar orasida katta farq', `Eng past: ${esc(ops[0].key)} ${pct(ops[0].r)}, eng yuqori: ${esc(ops[ops.length - 1].key)} ${pct(ops[ops.length - 1].r)}.`, "Eng past operatorning qo'ng'iroqlarini ko'rib chiqing (Jamoa → Vazifalar).");
   return out;
 }
-function planPage() {
-  const d = S.data, month = S.from.slice(0, 7), key = month + '-01', saved = d.plans.find(x => x.month === key);
+const planMonthKey = () => (S.planMonth || S.to.slice(0, 7)) + '-01';
+function planEditor() {
+  const d = S.data, key = planMonthKey(), month = key.slice(0, 7), saved = d.plans.find(x => x.month === key);
   const p = saved || { month: key, sales: 0, lead_qual: 0.2, qual_came: 0.3, came_sale: 0.8, cpl: 3, channels: {}, branches: {} };
   const need = planNeed(p), y = +month.slice(0, 4), m = +month.slice(5, 7), dim = new Date(y, m, 0).getDate();
-  const days = Math.round((new Date(S.to) - new Date(S.from)) / 864e5) + 1, scale = Math.min(days / dim, 1);
-  const [t = { leads: 0, qual: 0, came_to_branch: 0, won: 0, in_progress: 0 }] = groupSum(d.daily, () => 'all');
-  const sold = d.wonDaily.reduce((a, r) => a + +r.won, 0), spend = d.spend.reduce((a, r) => a + +r.spend, 0);
-  const today = iso(new Date()), isCurrent = today.slice(0, 7) === month && S.from === key && S.to >= today;
-  const elapsed = isCurrent ? +today.slice(8) : null, left = isCurrent ? dim - elapsed : null, forecast = isCurrent ? Math.round(sold / elapsed * dim) : null;
-  const tile = (l, fact, plan, f = num) => { const r = div(fact, plan); return `<div class="bg-surface rounded-3xl p-5"><div class="flex justify-between items-baseline"><span class="text-xs text-muted">${l}</span>${plan ? `<span class="text-xs font-semibold tabular-nums">${pct(r)}</span>` : ''}</div><div class="text-[26px] font-bold tabular-nums mt-1">${f(fact)}</div><div class="text-[11px] text-muted">reja ${plan ? f(plan) : '—'}</div><div class="mt-2 h-1.5 rounded-full bg-surface2 overflow-hidden"><div class="h-full rounded-full" style="width:${Math.min((r || 0) * 100, 100).toFixed(1)}%;background:rgb(var(--c-${r >= 0.9 ? 'green' : r >= 0.7 ? 'amber' : 'rose'}))"></div></div></div>`; };
-  const fc = !p.sales ? '' : isCurrent ? `<div class="rounded-2xl bg-surface2 p-4 text-[14px] mb-6"><b>Prognoz:</b> shu tezlikda oy <b>${num(forecast)} ta sotuv</b> bilan tugaydi (reja ${num(p.sales)}, ${pct(div(forecast, p.sales))}).${forecast < p.sales && left ? ` Rejaga yetish uchun qolgan ${left} kunda kuniga <b>${num(Math.ceil((p.sales - sold) / left))} ta</b> sotuv kerak (hozir kuniga ${(sold / elapsed).toFixed(1)}).` : ''}</div>` : `<p class="text-xs text-muted mb-6">Prognoz faqat joriy oy boshidan bugungacha tanlanganda ko'rinadi.</p>`;
-  const causes = p.sales ? planCauses(p, t, sold, need, scale) : [];
-  const tone = { danger: 'border-danger/40 bg-danger/10', warn: 'border-warn/40 bg-warn/10', success: 'border-success/40 bg-success/10' };
-  const causeHtml = card(h3('Nega orqadamiz va nima qilish kerak', 'Tanlangan davr raqamlaridan avtomatik') + (causes.length ? `<div class="grid lg:grid-cols-2 gap-3">${causes.map(c => `<div class="rounded-2xl border ${tone[c.tone]} p-4"><div class="font-semibold text-[13.5px]">${c.title}</div><div class="text-[13px] mt-1">${c.msg}</div>${c.action ? `<div class="text-[13px] mt-1.5 font-medium"><i class="ph-bold ph-arrow-right"></i> ${c.action}</div>` : ''}</div>`).join('')}</div>` : empty(p.sales ? "Katta og'ish topilmadi" : "Avval rejani kiriting")), 'mb-6');
+  const inRange = planRange().months.find(x => x.key === key), scale = inRange ? inRange.scale : 0;
+  const choices = []; for (let k = new Date(S.from.slice(0, 7) + '-01T00:00'), end = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1); k <= end || iso(k) <= S.to; k = new Date(k.getFullYear(), k.getMonth() + 1, 1)) choices.push(iso(k).slice(0, 7));
+  if (!choices.includes(month)) choices.push(month);
+  const picker = `<select onchange="S.planMonth=this.value;render()" class="h-9 px-2 rounded-xl bg-surface2 border border-line text-sm">${choices.map(c => `<option value="${c}" ${c === month ? 'selected' : ''}>${monthName(c + '-01')}${d.plans.find(x => x.month === c + '-01' && +x.sales) ? '' : ' — reja yo\'q'}</option>`).join('')}</select>`;
+  const cell = (fact, plan) => { if (!scale) return `<span class="text-xs text-muted tabular-nums">${plan ? num(plan / (scale || 1)) : '—'}</span>`; const r = div(fact, plan); return `<span class="font-semibold tabular-nums" style="${plan ? `color:rgb(var(--c-${r >= 0.9 ? 'green' : r >= 0.7 ? 'amber' : 'rose'}))` : ''}">${num(fact)}</span> <span class="text-xs text-muted tabular-nums">/ ${plan ? num(plan) : '—'}</span>`; };
+  const sc = scale || 1;
   // Channels
-  const won = {}; for (const r of d.wonDaily) won[channelOf(r.source)] = (won[channelOf(r.source)] || 0) + +r.won;
+  const won = Object.fromEntries(Object.entries(countBy(salesList(true), p => channelOf(p.source))).map(([k, o]) => [k, o.n]));
   const facts = Object.fromEntries(groupSum(d.daily, r => channelOf(r.source)).map(o => [o.key, o]));
   const names = allChannels().filter(c => facts[c] || won[c] || p.channels?.[c] != null);
-  const cell = (fact, plan) => { const r = div(fact, plan); return `<span class="font-semibold tabular-nums" style="${plan ? `color:rgb(var(--c-${r >= 0.9 ? 'green' : r >= 0.7 ? 'amber' : 'rose'}))` : ''}">${num(fact)}</span> <span class="text-xs text-muted tabular-nums">/ ${plan ? num(plan) : '—'}</span>`; };
   const share = c => (+(p.channels?.[c] ?? 0)) / 100;
   const chanRows = names.map(c => ({ c, leads: facts[c]?.leads || 0, qual: facts[c]?.qual || 0, sold: won[c] || 0, s: share(c) }));
   const chanTable = table([{ t: 'Kanal', f: o => `<span class="font-semibold">${esc(o.c)}</span>`, s: o => o.c },
     { t: 'Ulush', r: 1, f: o => `<input data-ch="${esc(o.c)}" type="number" min="0" max="100" value="${+(p.channels?.[o.c] ?? 0)}" class="w-16 h-8 px-2 rounded-lg bg-surface2 border border-line text-right">%`, s: o => o.s },
-    { t: 'Lead', r: 1, f: o => cell(o.leads, need.leads * o.s * scale), s: o => o.leads }, { t: 'Sifatli', r: 1, f: o => cell(o.qual, need.qual * o.s * scale), s: o => o.qual }, { t: 'Sotuv', r: 1, f: o => cell(o.sold, need.sales * o.s * scale), s: o => o.sold }], chanRows);
+    { t: 'Lead', r: 1, f: o => cell(o.leads, need.leads * o.s * sc), s: o => o.leads }, { t: 'Sifatli', r: 1, f: o => cell(o.qual, need.qual * o.s * sc), s: o => o.qual }, { t: 'Sotuv', r: 1, f: o => cell(o.sold, need.sales * o.s * sc), s: o => o.sold }], chanRows);
   // Branches
-  const br = {}; for (const r of d.brDaily) { const o = br[r.branch] ??= { b: r.branch, leads: 0, qual: 0, sold: 0 }; o.leads += +r.leads; o.qual += +r.qual; o.sold += +r.won; }
+  const brSold = countBy(salesList(true), p => p.branch || "NOMA'LUM");
+  const br = {}; for (const r of d.brDaily) { const o = br[r.branch] ??= { b: r.branch, leads: 0, qual: 0, sold: brSold[r.branch]?.n || 0 }; o.leads += +r.leads; o.qual += +r.qual; }
   const brList = Object.values(br).filter(o => o.b && !/^(Aniqlanmagan|Boshqa|NOMA)/i.test(o.b)).sort((a, b) => b.leads - a.leads);
   const brShare = b => (+(p.branches?.[b] ?? 0)) / 100, brSum = brList.reduce((a, o) => a + +(p.branches?.[o.b] ?? 0), 0);
   const brTable = table([{ t: 'Filial', f: o => `<span class="font-semibold">${esc(o.b)}</span>`, s: o => o.b },
     { t: 'Ulush', r: 1, f: o => `<input data-br="${esc(o.b)}" type="number" min="0" max="100" value="${+(p.branches?.[o.b] ?? 0)}" class="w-16 h-8 px-2 rounded-lg bg-surface2 border border-line text-right">%`, s: o => brShare(o.b) },
-    { t: 'Lead', r: 1, f: o => cell(o.leads, need.leads * brShare(o.b) * scale), s: o => o.leads }, { t: 'Sifatli', r: 1, f: o => cell(o.qual, need.qual * brShare(o.b) * scale), s: o => o.qual }, { t: 'Sotuv', r: 1, f: o => cell(o.sold, need.sales * brShare(o.b) * scale), s: o => o.sold }], brList);
+    { t: 'Lead', r: 1, f: o => cell(o.leads, need.leads * brShare(o.b) * sc), s: o => o.leads }, { t: 'Sifatli', r: 1, f: o => cell(o.qual, need.qual * brShare(o.b) * sc), s: o => o.qual }, { t: 'Sotuv', r: 1, f: o => cell(o.sold, need.sales * brShare(o.b) * sc), s: o => o.sold }], brList);
   const chSum = names.reduce((a, c) => a + +(p.channels?.[c] ?? 0), 0);
   const saveBtn = `<button class="h-11 px-6 rounded-xl bg-fg text-surface text-sm font-semibold">Rejani saqlash</button>`;
-  return sections('plan', [
-    ['res', 'Natija', () => `<div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-3">${tile('Lead', t.leads, need.leads * scale)}${tile('Sifatli lead', t.qual, need.qual * scale)}${tile('Filialga keldi', t.came_to_branch, need.came * scale)}${tile('Sotuv', sold, need.sales * scale)}${tile('Reklama xarajati', spend, need.budget * scale, v => adMoney(v, false))}</div>
-      <p class="text-[11px] text-muted mb-4">Reja tanlangan ${days} kunga bo'lingan (oy rejasi × ${days}/${dim}). Sotuv — shu davrda yopilgan sotuvlar.</p>${fc}`],
-    ['why', 'Sabab va harakat', () => causeHtml],
-    ['set', 'Reja', () => `<form onsubmit="savePlan(event)">${card(h3(`${MONTH_FULL[m - 1]} ${y} rejasi`, saved ? "O'zgartirib «Rejani saqlash»ni bosing." : "Bu oy uchun reja hali kiritilmagan.") + `<div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
+  const factNote = scale ? `Fakt / reja — tanlangan kunlar uchun (oy rejasi × ${Math.round(scale * dim)}/${dim}).` : "Bu oy tanlangan davrga kirmaydi — faqat oylik reja ko'rsatiladi.";
+  const tab = S.planTab || 'set';
+  const body = tab === 'ch' ? `<form onsubmit="savePlan(event)">${card(h3('Kanallar', `Ulushlar jami ${chSum}%${chSum === 100 ? '' : " — 100% bo'lishi kerak"}. ${factNote}`) + chanTable, 'mb-4')}${saveBtn}</form>`
+    : tab === 'br' ? `<form onsubmit="savePlan(event)">${card(h3('Filiallar', `Ulushlar jami ${brSum}%${brSum === 100 ? '' : " — 100% bo'lishi kerak"}. ${factNote}`) + brTable, 'mb-4')}${saveBtn}</form>`
+    : `<form onsubmit="savePlan(event)">${card(h3(`${MONTH_FULL[m - 1]} ${y} rejasi`, saved ? "O'zgartirib «Rejani saqlash»ni bosing." : "Bu oy uchun reja hali kiritilmagan.") + `<div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
       ${pctInput('plSales', 'Sotuv rejasi', p.sales, 'ta', '1')}${pctInput('plLQ', 'Lead → sifatli', fmtP(p.lead_qual))}${pctInput('plQC', 'Sifatli → filialga keldi', fmtP(p.qual_came))}${pctInput('plCS', 'Filialga keldi → sotuv', fmtP(p.came_sale))}${pctInput('plCpl', 'Target lead narxi', p.cpl, '$', '0.01')}</div>
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm"><div class="rounded-xl bg-surface2 p-3"><div class="text-xs text-muted">Kerakli lead</div><b class="tabular-nums">${num(need.leads)}</b> <span class="text-xs text-muted">kuniga ${num(need.leads / dim)}</span></div><div class="rounded-xl bg-surface2 p-3"><div class="text-xs text-muted">Kerakli sifatli</div><b class="tabular-nums">${num(need.qual)}</b></div><div class="rounded-xl bg-surface2 p-3"><div class="text-xs text-muted">Filialga kelishi kerak</div><b class="tabular-nums">${num(need.came)}</b></div><div class="rounded-xl bg-surface2 p-3"><div class="text-xs text-muted">Reklama byudjeti</div><b class="tabular-nums">${adMoney(need.budget, false)}</b> <span class="text-xs text-muted">${num(need.tLeads)} Target lead</span></div></div>`, 'mb-4')}${saveBtn}</form>`],
-    ['ch', 'Kanallar', () => `<form onsubmit="savePlan(event)">${card(h3('Kanallar', `Ulushlar jami ${chSum}%${chSum === 100 ? '' : " — 100% bo'lishi kerak"}. Lead/sifatli/sotuv: fakt / shu davr rejasi.`) + chanTable, 'mb-4')}${saveBtn}</form>`],
-    ['br', 'Filiallar', () => `<form onsubmit="savePlan(event)">${card(h3('Filiallar', `Ulushlar jami ${brSum}%${brSum === 100 ? '' : " — 100% bo'lishi kerak"}. Filial bo'yicha rejani shu yerda bering.`) + brTable, 'mb-4')}${saveBtn}</form>`],
-  ]);
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm"><div class="rounded-xl bg-surface2 p-3"><div class="text-xs text-muted">Kerakli lead</div><b class="tabular-nums">${num(need.leads)}</b> <span class="text-xs text-muted">kuniga ${num(need.leads / dim)}</span></div><div class="rounded-xl bg-surface2 p-3"><div class="text-xs text-muted">Kerakli sifatli</div><b class="tabular-nums">${num(need.qual)}</b></div><div class="rounded-xl bg-surface2 p-3"><div class="text-xs text-muted">Filialga kelishi kerak</div><b class="tabular-nums">${num(need.came)}</b></div><div class="rounded-xl bg-surface2 p-3"><div class="text-xs text-muted">Reklama byudjeti</div><b class="tabular-nums">${adMoney(need.budget, false)}</b></div></div>`, 'mb-4')}${saveBtn}</form>`;
+  return `<div class="flex flex-wrap items-center gap-3 mb-4">${picker}${segBtn([['set', 'Umumiy reja'], ['ch', 'Kanallar'], ['br', 'Filiallar']], tab, "S.planTab='$';render()")}</div>` + body;
 }
 async function savePlan(e) {
   e.preventDefault();
-  const month = S.from.slice(0, 7) + '-01', old = S.data.plans.find(x => x.month === month) || { sales: 0, lead_qual: 0.2, qual_came: 0.3, came_sale: 0.8, cpl: 3, channels: {}, branches: {} };
+  const month = planMonthKey(), old = S.data.plans.find(x => x.month === month) || { sales: 0, lead_qual: 0.2, qual_came: 0.3, came_sale: 0.8, cpl: 3, channels: {}, branches: {} };
   const num0 = (id, f, cur) => $(id) ? f(+$(id).value || 0) : cur;
   const pick = (attr, cur) => { const inputs = [...document.querySelectorAll(`input[${attr}]`)]; return inputs.length ? Object.fromEntries(inputs.map(i => [i.getAttribute(attr), +i.value || 0]).filter(x => x[1] > 0)) : cur; };
   const pct100 = v => v / 100, same = v => v;
@@ -1637,8 +1720,8 @@ function creatives() {
   const Tf = rows.reduce((t, o) => { for (const k of AD_SUMS) t[k] += o[k]; return t; }, { _foot: true, name: 'Jami', ...Object.fromEntries(AD_SUMS.map(x => [x, 0])) });
   const chooser = `<details class="relative"><summary class="list-none cursor-pointer h-9 px-3 rounded-xl bg-surface2 text-sm font-semibold inline-flex items-center gap-1.5"><i class="ph-bold ph-columns"></i>Ustunlar ${cols.length - 1}/${colsAll.length - 1}</summary><div class="absolute z-20 mt-2 right-0 w-64 max-h-96 overflow-y-auto bg-surface border border-line rounded-2xl shadow-card p-3 space-y-1">${colsAll.filter(c => !c.fixed).map(c => `<label class="flex items-center gap-2 text-sm py-0.5"><input type="checkbox" ${adColOn(c) ? 'checked' : ''} onchange="toggleAdCol('${c.k}',this.checked)" class="w-4 h-4">${c.t}</label>`).join('')}</div></details>`;
   const more = rows.length > A.limit ? `<div class="mt-4 flex items-center gap-3"><button onclick="S.ad.limit+=20;render()" class="h-9 px-4 rounded-xl bg-surface2 text-sm font-semibold">Yana 20 ta</button><span class="text-xs text-muted">${A.limit} / ${rows.length} ko'rsatildi</span></div>` : '';
-  return `<div class="flex flex-wrap items-center gap-3 mb-4">${dateToggle()}${attrToggle()}</div>` + card(`<div class="flex flex-wrap items-center gap-3 mb-4">
-      ${segBtn([['active', `Faol ${counts.active}`], ['paused', `To'xtagan ${counts.paused}`], ['all', `Hammasi ${counts.all}`]], A.status, "S.ad.status='$';S.ad.limit=20;render()")}
+  return `<div class="flex flex-wrap items-center gap-3 mb-4">${attrToggle()}</div>` + card(`<div class="flex flex-wrap items-center gap-3 mb-4">
+      ${segBtn([['all', `Hammasi ${counts.all}`], ['active', `Faol ${counts.active}`], ['paused', `To'xtagan ${counts.paused}`]], A.status, "S.ad.status='$';S.ad.limit=20;render()")}
       ${segBtn([['ad', "E'lonlar"], ['adset', 'Adsetlar'], ['campaign', 'Kampaniyalar']], A.level, "S.ad.level='$';S.ad.limit=20;render()")}
       ${chooser}
       <input value="${esc(A.q)}" placeholder="Qidirish…" onchange="S.ad.q=this.value;S.ad.limit=20;render()" class="h-9 px-3 rounded-xl bg-surface2 border border-line text-sm w-full sm:w-56 ml-auto">
@@ -1696,7 +1779,7 @@ function purchasesPage() {
     { t: 'Yopilgan', s: p => p.sold_at, f: p => `<span class="tabular-nums text-[13px]">${String(p.day).slice(8, 10)}.${String(p.day).slice(5, 7)} ${new Date(p.sold_at).toLocaleTimeString('uz', { hour: '2-digit', minute: '2-digit' })}</span>` },
   ];
   const listKey = listCols.map(c => c.t).join('|'), sorted = S.sort[listKey] ? rows : [...rows].sort((a, b) => String(b.sold_at).localeCompare(String(a.sold_at)));
-  return `<div class="flex flex-wrap items-center justify-between gap-3 mb-4">${channelPills()}<div class="flex flex-wrap gap-2">${dateToggle()}${attrToggle()}</div></div>
+  return `<div class="flex flex-wrap items-center justify-between gap-3 mb-4">${channelPills()}<div class="flex flex-wrap gap-2">${attrToggle()}</div></div>
     <div class="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-6">${kpiTile('Tushum', somMoney(rev), `${num(all.length)} ta sotuv`, 'green')}${kpiTile('Sotuvlar', num(all.length), saleMode() ? 'shu davrda yopilgan' : 'shu davr leadlaridan', 'blue')}${kpiTile("O'rtacha chek", somMoney(div(rev, all.length)), '', 'violet')}${kpiTile('Odatiy muddat', avgDays == null ? '—' : avgDays.toFixed(1) + ' kun', 'lead kelgandan sotuvgacha (mediana)', 'amber')}${kpiTile('Eng tez kampaniya', fastest ? fastest.avg.toFixed(1) + ' kun' : '—', fastest ? esc(fastest.key) : 'kamida 2 ta sotuv kerak', 'teal')}${kpiTile('Kuniga tushum', somMoney(div(rev, days)), `${days} kun ichida`, 'rose')}</div>` +
     sections('purch', [
       ['list', 'Sotuvlar', () => card(`<div class="flex flex-wrap items-center gap-3 mb-3"><input value="${esc(S.pq || '')}" placeholder="Ism, telefon yoki deal raqami…" onchange="S.pq=this.value;render()" class="h-9 px-3 rounded-xl bg-surface2 border border-line text-sm w-full sm:w-72"><span class="text-xs text-muted ml-auto">${num(rows.length)} ta · ${ATTR_NOTE}</span></div>` + table(listCols, sorted, null, null, true))],
@@ -1714,7 +1797,7 @@ function reportPage() {
   rows = [...rows].sort((a, b) => b.spend - a.spend);
   const colsAll = adColumns(R.level, T, false), cols = colsAll.filter(c => c.fixed || R.keys.has(c.k));
   const box = c => `<label class="inline-flex items-center gap-2 text-sm mr-4 mb-1"><input type="checkbox" ${R.keys.has(c.k) ? 'checked' : ''} onchange="S.rep.keys[this.checked?'add':'delete']('${c.k}');render()" class="w-4 h-4">${c.t}</label>`;
-  return `<div class="no-print">` + card(`<div class="flex flex-wrap items-center gap-3 mb-4">${segBtn([['campaign', 'Kampaniyalar'], ['adset', 'Ad setlar'], ['ad', "E'lonlar"]], R.level, "S.rep.level='$';render()")}${dateToggle()}${attrToggle()}<input value="${esc(R.q)}" placeholder="Nomi bo'yicha filtr…" onchange="S.rep.q=this.value;render()" class="h-9 px-3 rounded-xl bg-surface2 border border-line text-sm w-full sm:w-56"><button onclick="window.print()" class="h-9 px-4 rounded-xl bg-fg text-surface text-sm font-semibold ml-auto inline-flex items-center gap-1.5"><i class="ph-bold ph-file-pdf"></i>PDF yuklab olish</button></div>
+  return `<div class="no-print">` + card(`<div class="flex flex-wrap items-center gap-3 mb-4">${segBtn([['campaign', 'Kampaniyalar'], ['adset', 'Ad setlar'], ['ad', "E'lonlar"]], R.level, "S.rep.level='$';render()")}${attrToggle()}<input value="${esc(R.q)}" placeholder="Nomi bo'yicha filtr…" onchange="S.rep.q=this.value;render()" class="h-9 px-3 rounded-xl bg-surface2 border border-line text-sm w-full sm:w-56"><button onclick="window.print()" class="h-9 px-4 rounded-xl bg-fg text-surface text-sm font-semibold ml-auto inline-flex items-center gap-1.5"><i class="ph-bold ph-file-pdf"></i>PDF yuklab olish</button></div>
     <div class="text-xs font-semibold mb-2">Ko'rsatkichlar</div><div>${colsAll.filter(c => !c.fixed).map(box).join('')}</div>
     <p class="text-[11px] text-muted mt-3">«PDF yuklab olish» → ochilgan oynada «Saqlash: PDF» ni tanlang. Davrni yuqoridagi kalendardan o'zgartiring.</p>`, 'mb-6') + `</div>` +
     card(`<div class="flex flex-wrap items-end justify-between gap-3 mb-4"><div><div class="text-lg font-bold">Reklama hisoboti — Robbit akademiyasi</div><div class="text-xs text-muted">${fmtDay(S.from)} — ${fmtDay(S.to)} · ${{ campaign: 'kampaniyalar', adset: 'ad setlar', ad: "e'lonlar" }[R.level]} bo'yicha · ${(S.attr || 'last') === 'first' ? 'First click' : 'Last click'} · ${saleMode() ? 'sotuv sanasi' : 'lead sanasi'}</div></div><div class="text-xs text-muted">Tayyorlandi: ${new Date().toLocaleString('uz')}</div></div>
@@ -1722,7 +1805,10 @@ function reportPage() {
     table(cols, rows, T, 100000, true), 'print-area');
 }
 
-const VIEWS = { purchases: purchasesPage, report: reportPage, integr: integrPage, mapping: mappingPage, plan: planPage, geo: geoPage, economy: economyPage, tasks: tasksPage, overview, funnel, daily, leads, money: moneyPage, cohort, creatives, pains, managers, calls, speed: speedPage, metrics: metricsPage, branches: branchesPage, status: statusPage, guide: guidePage, briefs, ai, settings, users: usersPage };
+const salesAll = () => merged('m_sales', [['list', 'Sotuvlar ro\'yxati', 'ph-receipt', purchasesPage], ['when', "Sotuv qachon bo'ladi", 'ph-hourglass-medium', cohort], ['money', "To'lovlar va sikl", 'ph-wallet', moneyPage]]);
+const dailyAll = () => merged('m_daily', [['ch', 'Kanallar va kunlar', 'ph-calendar-dots', daily], ['m', 'Kunlik metrikalar', 'ph-chart-bar', metricsPage]]);
+const teamAll = () => merged('m_team', [['m', 'Menejerlar', 'ph-users', managers], ['c', "Qo'ng'iroqlar", 'ph-phone', calls]]);
+const VIEWS = { purchases: salesAll, report: reportPage, integr: integrPage, mapping: mappingPage, geo: geoPage, economy: economyPage, tasks: tasksPage, overview, funnel, daily: dailyAll, leads, creatives, pains, managers: teamAll, speed: speedPage, branches: branchesPage, status: statusPage, guide: guidePage, briefs, ai, settings, users: usersPage };
 function render() { $('app').innerHTML = shell(S.data.funnel ? VIEWS[S.page]() : card(empty('Yuklanmoqda…'))); }
 // Starts the Meta / Bitrix / call syncs now (sync-now waits up to ~55 s), then reloads the data.
 async function syncNow() {
