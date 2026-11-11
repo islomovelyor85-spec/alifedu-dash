@@ -24,8 +24,23 @@ Deno.serve(async (req) => {
     const qual: string[] = cfg?.qual_statuses ?? [], won: string[] = cfg?.won_stages ?? [], lost: string[] = cfg?.lost_stages ?? [];
     const now = () => new Date().toISOString();
 
-    const leadSelect = ["ID", "STATUS_ID", "DATE_CREATE", "ASSIGNED_BY_ID", "UTM_SOURCE", "UTM_CAMPAIGN", "UTM_CONTENT", "PHONE", "SOURCE_ID", AD_ID_FIELD, FORM_BRANCH_FIELD];
-    // Operator code only (998 93 xxx → "93"); the full number is never stored.
+    const leadSelect = ["ID", "STATUS_ID", "DATE_CREATE", "ASSIGNED_BY_ID", "UTM_SOURCE", "UTM_CAMPAIGN", "UTM_CONTENT", "PHONE", "NAME", "LAST_NAME", "TITLE", "SOURCE_ID", AD_ID_FIELD, FORM_BRANCH_FIELD];
+    // Full number in one form (998XXXXXXXXX) so the same client's leads can be matched; admins only (RLS).
+    const phoneOf = (r: Any) => {
+      const d = String(r.PHONE?.[0]?.VALUE ?? "").replace(/\D/g, "");
+      return d.length === 9 ? "998" + d : d.length >= 9 ? d : null;
+    };
+    const nameOf = (r: Any) => [r.NAME, r.LAST_NAME].map((x) => String(x ?? "").trim()).filter(Boolean).join(" ") || String(r.TITLE ?? "").trim() || null;
+    // Leads created before leads_from are kept only when a deal points to them (sales keep their source).
+    const leadsFrom = cfg?.leads_from ? new Date(cfg.leads_from + "T00:00:00+05:00") : null;
+    const keepLeads = async (rows: Any[]) => {
+      if (!leadsFrom) return rows;
+      const old = rows.filter((r) => new Date(r.created_at) < leadsFrom).map((r) => r.bitrix_id);
+      if (!old.length) return rows;
+      const { data } = await sb.from("deals").select("lead_id").in("lead_id", old);
+      const linked = new Set((data ?? []).map((d: Any) => d.lead_id));
+      return rows.filter((r) => new Date(r.created_at) >= leadsFrom || linked.has(r.bitrix_id));
+    };
     const phoneCode = (r: Any) => {
       const d = String(r.PHONE?.[0]?.VALUE ?? "").replace(/\D/g, "");
       const local = d.length === 12 && d.startsWith("998") ? d.slice(3) : d.length === 9 ? d : null;
@@ -39,7 +54,7 @@ Deno.serve(async (req) => {
         bitrix_id: +r.ID, ad_id: /^\d+$/.test(adField) ? adField : /^\d+$/.test(utm) ? utm : null,
         utm_source: r.UTM_SOURCE || null, utm_campaign: r.UTM_CAMPAIGN || null, utm_content: utm || null,
         created_at: r.DATE_CREATE, status: r.STATUS_ID, is_qual: qual.includes(r.STATUS_ID),
-        manager_id: +r.ASSIGNED_BY_ID || null, phone_code: phoneCode(r), source_id: r.SOURCE_ID || null, updated_at: now(),
+        manager_id: +r.ASSIGNED_BY_ID || null, phone_code: phoneCode(r), phone: phoneOf(r), name: nameOf(r)?.slice(0, 200) ?? null, source_id: r.SOURCE_ID || null, updated_at: now(),
         form_branch: String(r[FORM_BRANCH_FIELD] ?? "").trim().slice(0, 200) || null,
         ...(COURSE_FIELD ? { course: r[COURSE_FIELD] ? String(r[COURSE_FIELD]).toUpperCase() : null } : {}),
         ...(BRANCH_FIELD ? { branch: r[BRANCH_FIELD] ? String(r[BRANCH_FIELD]).toUpperCase() : null } : {}),
@@ -54,7 +69,7 @@ Deno.serve(async (req) => {
       const isWon = won.length ? won.includes(r.STAGE_ID) : r.STAGE_SEMANTIC_ID === "S";
       const isLost = lost.length ? lost.includes(r.STAGE_ID) : r.STAGE_SEMANTIC_ID === "F";
       return {
-        bitrix_id: +r.ID, lead_id: +r.LEAD_ID || null, stage: r.STAGE_ID, amount: +r.OPPORTUNITY || 0,
+        bitrix_id: +r.ID, lead_id: +r.LEAD_ID || null, title: String(r.TITLE ?? "").trim().slice(0, 200) || null, stage: r.STAGE_ID, amount: +r.OPPORTUNITY || 0,
         created_at: r.DATE_CREATE, won_at: isWon ? (r.CLOSEDATE || r.DATE_MODIFY) : null,
         is_won: isWon, is_lost: isLost, manager_id: +r.ASSIGNED_BY_ID || null,
         paid_amount: parseFloat(String(r.UF_CRM_1690399614 ?? "").split("|")[0]) || 0,
@@ -69,7 +84,7 @@ Deno.serve(async (req) => {
       { source: "bitrix_leads", method: "crm.lead.list", select: leadSelect, map: lead, table: "leads" },
       {
         source: "bitrix_deals", method: "crm.deal.list", table: "deals", map: deal,
-        select: ["ID", "LEAD_ID", "STAGE_ID", "STAGE_SEMANTIC_ID", "OPPORTUNITY", "DATE_CREATE", "CLOSEDATE", "DATE_MODIFY", "ASSIGNED_BY_ID",
+        select: ["ID", "LEAD_ID", "TITLE", "STAGE_ID", "STAGE_SEMANTIC_ID", "OPPORTUNITY", "DATE_CREATE", "CLOSEDATE", "DATE_MODIFY", "ASSIGNED_BY_ID",
           "UF_CRM_1690399614", "UF_CRM_1742372657", "UF_CRM_1735389373322", "UF_CRM_6A8C1DE6EB661", DEAL_BRANCH_FIELD], // paid total, first payment date, lost reasons, branch
       },
     ];
@@ -85,7 +100,8 @@ Deno.serve(async (req) => {
       let n = 0;
       while (true) {
         const page = await bxPage(s.method, { ">=DATE_MODIFY": st.run_since }, s.select, +st.last_id);
-        await upsert(s.table, page.map(s.map), "bitrix_id");
+        const rows = page.map(s.map);
+        await upsert(s.table, s.table === "leads" ? await keepLeads(rows) : rows, "bitrix_id");
         n += page.length;
         if (page.length) st.last_id = +page[page.length - 1].ID;
         if (page.length < 50) {

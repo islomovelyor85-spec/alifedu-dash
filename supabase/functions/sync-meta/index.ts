@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
         const rows = await metaAll(`${act}/insights`, {
           level: "ad",
           time_increment: "1",
-          fields: "ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,spend,impressions,clicks,actions,optimization_goal",
+          fields: "ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,spend,impressions,clicks,inline_link_clicks,actions,optimization_goal",
           time_range: JSON.stringify({ since: day(from), until: day(to) }),
           limit: "500",
         });
@@ -64,6 +64,7 @@ Deno.serve(async (req) => {
           daily.push({
             ad_id: r.ad_id, date: r.date_start, spend: +r.spend || 0,
             impressions: +r.impressions || 0, clicks: +r.clicks || 0, leads: leadCount(r.actions), results: resultCount(r.optimization_goal, r.actions),
+            link_clicks: +r.inline_link_clicks || 0, lpv: +((r.actions ?? []).find((x: Any) => x.action_type === "landing_page_view")?.value ?? 0) || 0,
           });
         }
         await flush(daily);

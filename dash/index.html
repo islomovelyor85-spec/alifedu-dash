@@ -26,6 +26,14 @@
   .dark .hero { background: rgb(var(--surface)); color: rgb(var(--fg)); }
   .no-scrollbar::-webkit-scrollbar { display: none; }
   td, th { white-space: nowrap; }
+  @media print {
+    :root, .dark { --bg: 255 255 255; --surface: 255 255 255; --surface2: 244 245 248; --line: 220 222 228; --fg: 17 17 19; --muted: 90 94 104; color-scheme: light; }
+    aside, header, .no-print, .print-hide { display: none !important; }
+    main { padding-left: 0 !important; } main > div { padding: 0 !important; max-width: none !important; }
+    body { background: #fff !important; } .overflow-x-auto { overflow: visible !important; }
+    table { font-size: 10px; } td, th { padding: 3px 5px !important; white-space: normal; }
+    .print-area { padding: 0 !important; }
+  }
 </style>
 </head>
 <body class="bg-bg text-fg font-sans">
@@ -52,6 +60,7 @@ const div = (a, b) => b ? a / b : null;
 const CCY = { USD: '$', EUR: '€', RUB: '₽', UZS: '' };
 // Meta spend is in the ad account currency; show it with the so'm equivalent (CBU rate from sync-meta).
 const adMoney = (n, uzs = true) => { if (n == null || !isFinite(n)) return '—'; const c = S.data.cfg?.ad_currency || 'USD', fx = +S.data.cfg?.fx_rate || 0;
+  if (S.ccy === 'UZS' && fx && c !== 'UZS') return moneyShortTop(n * fx) + " so'm";
   const main = c === 'UZS' ? money(n) : `${CCY[c] ?? c + ' '}${n >= 100 ? num(n) : (+n).toFixed(2)}`;
   return uzs && fx && c !== 'UZS' ? `${main}<div class="text-[10px] text-muted">≈ ${moneyShortTop(n * fx)} so'm</div>` : main; };
 const moneyShortTop = n => Math.abs(n) >= 1e9 ? (n / 1e9).toFixed(2) + ' mlrd' : Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(1) + ' mln' : num(n);
@@ -166,8 +175,8 @@ function calendar() {
 const NAV = ADMIN ? [['', [['status', 'Holat', 'ph-pulse'], ['integr', 'Ulanishlar', 'ph-plugs-connected'], ['mapping', 'Mapping', 'ph-sliders-horizontal'], ['settings', 'Sozlamalar', 'ph-gear'], ['users', 'Foydalanuvchilar', 'ph-user-gear']]]] : [
   ['', [['overview', 'Umumiy', 'ph-squares-four'], ['plan', 'Reja va fakt', 'ph-target'], ['funnel', 'Voronka', 'ph-funnel'], ['branches', 'Filiallar', 'ph-buildings']]],
   ['Manbalar', [['daily', 'Kunlar va kanallar', 'ph-calendar-dots'], ['metrics', 'Kunlik metrikalar', 'ph-chart-bar'], ['leads', 'Lead tahlili', 'ph-user-list']]],
-  ['Sotuv va pul', [['cohort', "Sotuv qachon bo'ladi", 'ph-hourglass-medium'], ['money', "To'lovlar va sikl", 'ph-wallet'], ['economy', 'Iqtisodiyot', 'ph-coins']]],
-  ['Marketing', [['creatives', 'Kreativlar', 'ph-film-strip'], ['geo', 'Lokatsiya isrofi', 'ph-map-pin'], ['briefs', 'Brieflar', 'ph-note-pencil']]],
+  ['Sotuv va pul', [['purchases', 'Sotuvlar', 'ph-receipt'], ['cohort', "Sotuv qachon bo'ladi", 'ph-hourglass-medium'], ['money', "To'lovlar va sikl", 'ph-wallet'], ['economy', 'Iqtisodiyot', 'ph-coins']]],
+  ['Marketing', [['creatives', 'Kreativlar', 'ph-film-strip'], ['geo', 'Lokatsiya isrofi', 'ph-map-pin'], ['briefs', 'Brieflar', 'ph-note-pencil'], ['report', 'Hisobot (PDF)', 'ph-file-pdf']]],
   ['Jamoa', [['managers', 'Menejerlar', 'ph-users'], ['calls', "Qo'ng'iroqlar", 'ph-phone'], ['pains', "Og'riqlar va e'tirozlar", 'ph-chat-circle-dots'], ['speed', 'Aloqa tezligi', 'ph-timer'], ['tasks', 'Vazifalar', 'ph-check-square']]],
   ['Yordam', [['ai', 'AI yordamchi', 'ph-sparkle'], ['guide', "Yo'riqnoma", 'ph-book-open']]],
 ];
@@ -227,6 +236,7 @@ async function loadCalls() {
 }
 async function load() {
   S.warn = [];
+  const purchasesP = q('v_purchases', x => x.gte('sold_at', '2026-04-01'));
   const day = x => x.gte('day', S.from).lte('day', S.to);
   const wk = new Date(S.from + 'T00:00'); wk.setDate(wk.getDate() - (wk.getDay() + 6) % 7); const weekFrom = iso(wk);
   const [funnel, courses, cohort, creatives, naming, pains, taxonomy, objections, managers, briefs, cfg, sync, outcomes, sales, users, dealStages, hours, codes, daily, operators, statusOut, cycle, money, lostReasons, cohortSum, cohortSrc, spend, adDaily, adLeads, adCatalog, wonDaily, salesMonth, calls, speed, dm, dmLive, queue, brDaily, brSpend, brCamp, plans, adGeo, economy, tasks, staff, capi, crmMap, crmStatuses] = await Promise.all([
@@ -248,6 +258,7 @@ async function load() {
   ]);
   S.data = { funnel, courses, cohort, creatives, naming, pains, taxonomy, objections, managers, briefs, cfg, sync, outcomes, sales, users, dealStages, hours, codes, daily, operators, statusOut, cycle, money, lostReasons, cohortSum, cohortSrc, spend, adDaily, adLeads, adCatalog, wonDaily, salesMonth, calls, speed, dm, dmLive, queue, brDaily, brSpend, brCamp, plans, adGeo, economy, tasks, staff, capi, crmMap, crmStatuses };
   const srcName = Object.fromEntries(crmStatuses.filter(r => r.entity === 'SOURCE').map(r => [r.status_id, r.name]));
+  S.data.purchases = await purchasesP;
   S.data.me = ADMIN ? (await q('admins'))[0] : null;
   S.data.chanMap = Object.fromEntries(crmMap.filter(r => r.kind === 'source').map(r => [srcName[r.code] || r.code, r.value]));
   S.data.hiddenUsers = new Set(crmMap.filter(r => r.kind === 'user' && r.value === 'hide').map(r => normName(users[r.code])));
@@ -283,7 +294,7 @@ function shell(body) {
           <h1 class="text-lg font-bold truncate">${title}</h1>
           <div class="ml-auto flex items-center gap-2 text-sm">
             <button onclick="syncNow()" ${S.syncing ? 'disabled' : ''} class="h-9 px-3 rounded-xl bg-surface border border-line flex items-center gap-1.5" title="Bitrix, Meta va qo'ng'iroqlarni hozir yangilash"><i class="ph-bold ph-arrows-clockwise ${S.syncing ? 'animate-spin' : ''}"></i><span class="hidden sm:inline">${S.syncing ? 'Yangilanmoqda…' : 'Yangilash'}</span></button>
-            <button onclick="toggleTheme()" class="h-9 w-9 rounded-full bg-surface border border-line" aria-label="Rang rejimi" title="Yorug' / qora"><i class="ph-bold ${document.documentElement.classList.contains('dark') ? 'ph-sun' : 'ph-moon'}"></i></button>
+            ${ccyToggle()}<button onclick="toggleTheme()" class="h-9 w-9 rounded-full bg-surface border border-line" aria-label="Rang rejimi" title="Yorug' / qora"><i class="ph-bold ${document.documentElement.classList.contains('dark') ? 'ph-sun' : 'ph-moon'}"></i></button>
             ${['settings', 'integr', 'status', 'users', 'guide', 'ai'].includes(S.page) ? '' : calendar()}
             ${SOURCE_PAGES.includes(S.page) ? `<select onchange="S.source=this.value;render()" class="h-9 px-2 rounded-xl bg-surface border ${S.source ? 'border-accent text-accent' : 'border-line'}" aria-label="Kanal">${sources.map(v => `<option value="${esc(v)}" ${v === S.source ? 'selected' : ''}>${v ? esc(v) : 'Barcha kanallar'}</option>`).join('')}</select>` : ''}
           </div>
@@ -477,51 +488,6 @@ function cohort() {
     `<p class="text-xs text-muted mt-2">«Sotuv» — Bitrix'da «Сделка успешна» bo'lgan deal. Iyuldan oldingi oylar to'liq yuklanmagan.</p>`) + '</details>';
 }
 
-function creatives() {
-  const d = S.data, A = S.ad, fx = +d.cfg?.fx_rate || 0;
-  const cat = Object.fromEntries(d.adCatalog.map(a => [a.id, a]));
-  const keyOf = id => { const a = cat[id] || {}; return A.level === 'ad' ? id : A.level === 'adset' ? (a.adset || '—') : (a.campaign || '—'); };
-  const by = {};
-  const get = id => { const k = keyOf(id), a = cat[id] || {}; return by[k] ??= { key: k, name: A.level === 'ad' ? (a.name || id) : k, thumb: A.level === 'ad' ? a.thumb : null, adset: a.adset, campaign: a.campaign, branch: a.branch, active: false, spend: 0, impr: 0, clicks: 0, mleads: 0, leads: 0, qual: 0, won: 0, revenue: 0 }; };
-  for (const r of d.adDaily) { const o = get(r.ad_id); o.spend += +r.spend; o.impr += +r.impressions; o.clicks += +r.clicks; o.mleads += +(r.results ?? r.leads); }
-  for (const r of d.adLeads) { const o = get(r.ad_id); o.leads += +r.leads; o.qual += +r.qual; o.won += +r.won; o.revenue += +r.revenue; }
-  for (const a of d.adCatalog) if (a.status === 'ACTIVE' && by[keyOf(a.id)]) by[keyOf(a.id)].active = true;
-  let rows = Object.values(by).filter(o => o.spend > 0 || o.leads > 0);
-  const counts = { active: rows.filter(o => o.active).length, paused: rows.filter(o => !o.active).length, all: rows.length };
-  if (A.status !== 'all') rows = rows.filter(o => A.status === 'active' ? o.active : !o.active);
-  if (A.q) { const t = A.q.toLowerCase(); rows = rows.filter(o => [o.name, o.adset, o.campaign].some(x => String(x || '').toLowerCase().includes(t))); }
-  if (!S.sort[CREATIVE_KEY]) rows.sort((a, b) => b.spend - a.spend);
-  const T = rows.reduce((t, o) => { for (const k of ['spend', 'impr', 'clicks', 'mleads', 'leads', 'qual', 'won', 'revenue']) t[k] += o[k]; return t; }, { _foot: true, name: 'Jami', spend: 0, impr: 0, clicks: 0, mleads: 0, leads: 0, qual: 0, won: 0, revenue: 0 });
-  const m = o => ({ ctr: div(o.clicks, o.impr), cpc: div(o.spend, o.clicks), cpm: o.impr ? o.spend / o.impr * 1000 : null, cpl: div(o.spend, o.mleads), cpql: div(o.spend, o.qual), cps: div(o.spend, o.won), roas: fx && o.spend ? o.revenue / (o.spend * fx) : null });
-  const avgCpql = m(T).cpql;
-  const seg = (items, cur, set) => `<div class="inline-flex p-1 bg-surface2 rounded-xl text-xs font-semibold">${items.map(([k, t]) => `<button onclick="${set.replace('$', k)}" class="px-3 h-7 rounded-lg ${cur === k ? 'bg-surface shadow-sm text-fg' : 'text-muted hover:text-fg'}">${t}</button>`).join('')}</div>`;
-  const usd = n => adMoney(n, false);
-  const cols = [
-    { t: A.level === 'ad' ? "E'lon" : A.level === 'adset' ? 'Adset' : 'Kampaniya', s: o => o.name, f: o => o._foot ? '<b>Jami</b>' : `<div class="flex items-center gap-3">${A.level === 'ad' ? (o.thumb ? `<img src="${esc(o.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="w-12 h-12 rounded-lg object-cover bg-surface2 shrink-0" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'w-12 h-12 rounded-lg bg-surface2 shrink-0'}))">` : '<div class="w-12 h-12 rounded-lg bg-surface2 shrink-0 grid place-items-center text-muted"><i class="ph ph-image"></i></div>') : ''}<div class="max-w-[260px] min-w-0"><div class="font-semibold truncate" title="${esc(o.name)}">${esc(o.name)}</div><div class="text-[11px] text-muted truncate">${o.active ? '<span style="color:rgb(var(--c-green))">● Faol</span>' : "<span>○ To'xtagan</span>"}${A.level === 'ad' ? ' · ' + esc(o.adset || '') : ''}</div></div></div>` },
-    { t: 'Xarajat', r: 1, s: o => o.spend, f: o => usd(o.spend) },
-    { t: 'Ko\'rishlar', r: 1, s: o => o.impr, f: o => num(o.impr) },
-    { t: 'CTR', r: 1, s: o => m(o).ctr ?? -1, f: o => pct(m(o).ctr) },
-    { t: 'CPC', r: 1, s: o => m(o).cpc ?? 1e9, f: o => usd(m(o).cpc) },
-    { t: 'CPM', r: 1, s: o => m(o).cpm ?? 1e9, f: o => usd(m(o).cpm) },
-    { t: 'Natija (Meta)', r: 1, s: o => o.mleads, f: o => num(o.mleads) },
-    { t: 'CPL', r: 1, s: o => m(o).cpl ?? 1e9, f: o => usd(m(o).cpl) },
-    { t: 'Lead (Bitrix)', r: 1, s: o => o.leads, f: o => num(o.leads) },
-    { t: 'Sifatli', r: 1, s: o => o.qual, f: o => `${num(o.qual)} <span class="text-[11px] text-muted">${pct(div(o.qual, o.leads))}</span>` },
-    { t: 'CPQL', r: 1, s: o => m(o).cpql ?? 1e9, f: o => o._foot || m(o).cpql == null ? usd(m(o).cpql) : chip(usd(m(o).cpql), m(o).cpql <= avgCpql ? 'success' : 'danger') },
-    { t: 'Sotuv', r: 1, s: o => o.won, f: o => num(o.won) },
-    { t: 'Sotuv narxi', r: 1, s: o => m(o).cps ?? 1e9, f: o => usd(m(o).cps) },
-    { t: 'ROAS', r: 1, s: o => m(o).roas ?? -1, f: o => m(o).roas == null ? '—' : m(o).roas.toFixed(2) + '×' },
-  ];
-  const more = rows.length > A.limit ? `<div class="mt-4 flex items-center gap-3"><button onclick="S.ad.limit+=20;render()" class="h-9 px-4 rounded-xl bg-surface2 text-sm font-semibold">Yana 20 ta</button><span class="text-xs text-muted">${A.limit} / ${rows.length} ko'rsatildi</span></div>` : '';
-  return card(`<div class="flex flex-wrap items-center gap-3 mb-4">
-      ${seg([['active', `Faol ${counts.active}`], ['paused', `To'xtagan ${counts.paused}`], ['all', `Hammasi ${counts.all}`]], A.status, "S.ad.status='$';S.ad.limit=20;render()")}
-      ${seg([['ad', "E'lonlar"], ['adset', 'Adsetlar'], ['campaign', 'Kampaniyalar']], A.level, "S.ad.level='$';S.ad.limit=20;render()")}
-      <input value="${esc(A.q)}" placeholder="Qidirish…" onchange="S.ad.q=this.value;S.ad.limit=20;render()" class="h-9 px-3 rounded-xl bg-surface2 border border-line text-sm w-full sm:w-56 ml-auto">
-    </div>` + h3('Kreativlar samaradorligi', `CTR = klik / ko'rish · CPC = klik narxi · CPM = 1000 ko'rish narxi · CPL = Meta natija narxi · CPQL = sifatli lead narxi (o'rtachadan arzon — sariq) · ROAS = tushum / xarajat. Ustun nomini bosing — saralanadi.`) +
-    table(cols, rows, T, A.limit) + more);
-}
-const CREATIVE_KEY = "E'lon|Xarajat|Ko'rishlar|CTR|CPC|CPM|Lead (Meta)|CPL|Lead (Bitrix)|Sifatli|CPQL|Sotuv|Sotuv narxi|ROAS";
-
 // Objections heard in analysed calls of the selected dates, with how often such calls still ended booked.
 function callObjections() {
   const ok = analysed(), by = {};
@@ -617,6 +583,7 @@ function funnel() {
   const byMgr = sumBy(rows.filter(r => r.deal_manager_id && !isHiddenUser(r.deal_manager)), r => r.deal_manager).filter(o => o.deals >= 5).sort((a, b) => b.won - a.won);
   return toolbar + sections('funnel', [
     ['v', 'Voronka', () => card(h3('Umumiy voronka', `Tanlangan davrda (${fmtDay(S.from)}${S.from !== S.to ? ' — ' + fmtDay(S.to) : ''}) kelgan barcha leadlar. Bosqichlar orasidagi raqam — oldingi bosqichdan o'tganlar ulushi, 50% dan past bo'lsa qizil.`) + `<div>${bars}</div>` + wonGap(t.won, allWon))],
+    ['ad', 'Reklama voronkasi', adFunnel],
     ['st', 'Stadiyalar', () => stageCards(bySource(S.data.outcomes)) + card(h3("Lead stadiyasi bo'yicha konversiya", "Hozir shu stadiyada turgan leadlar: ulardan nechtasi sotuvga aylangan, jarayonda, deal yopilgan yoki sifatsiz.") + outcomeTable('Stadiya', groupSum(bySource(S.data.statusOut), r => r.status_name).map(o => ({ ...o, sort: Math.min(...bySource(S.data.statusOut).filter(r => r.status_name === o.key).map(r => r.sort)) })).sort((a, b) => a.sort - b.sort), r => `<span class="font-semibold">${esc(r.key)}</span>`), 'mb-6')],
     ['op', 'Operatorlar', () => card(h3("Operatorlar (kim gaplashgan)", "Lead egasi (call-markaz). Ustun nomini bosing — eng yuqori/past konversiya.") + outcomeTable('Operator', groupSum(bySource(S.data.operators), r => r.operator).filter(o => o.leads >= 20 && !isHiddenUser(o.key)).sort((a, b) => b.leads - a.leads), r => `<span class="font-semibold">${esc(r.key)}</span>`), 'mb-6')],
     ['br', 'Filiallar va menejerlar', () => card(h3('Filiallar', "Deal egasi ismidagi filial nomidan (masalan «|| Xadra»).") + table(dealCols('Filial'), byBranch), 'mb-6') + card(h3('Filial menejerlari', 'Kamida 5 ta deal') + table(dealCols('Menejer'), byMgr), 'mb-6')],
@@ -1595,7 +1562,166 @@ async function saveMap() {
   alert(`Saqlandi. Qayta hisoblandi: ${num(data?.leads || 0)} lead, ${num(data?.deals || 0)} deal.`);
 }
 
-const VIEWS = { integr: integrPage, mapping: mappingPage, plan: planPage, geo: geoPage, economy: economyPage, tasks: tasksPage, overview, funnel, daily, leads, money: moneyPage, cohort, creatives, pains, managers, calls, speed: speedPage, metrics: metricsPage, branches: branchesPage, status: statusPage, guide: guidePage, briefs, ai, settings, users: usersPage };
+// ---------- Currency, attribution and sales (purchases) ----------
+let ccyPref = null; try { ccyPref = localStorage.getItem('audit-ccy'); } catch {}
+let adColsPref = {}; try { adColsPref = JSON.parse(localStorage.getItem('audit-adcols') || '{}') || {}; } catch {}
+S.ccy = ccyPref === 'UZS' ? 'UZS' : 'ad'; S.attr = 'last';
+function setCcy(c) { S.ccy = c; try { localStorage.setItem('audit-ccy', c); } catch {} render(); }
+const fxRate = () => +S.data.cfg?.fx_rate || 0, adCcy = () => S.data.cfg?.ad_currency || 'USD';
+// A so'm amount (deal revenue) in the currency picked in the header.
+const somMoney = n => { if (n == null || !isFinite(n)) return '—'; const fx = fxRate();
+  if (S.ccy !== 'ad' || !fx || adCcy() === 'UZS') return (n < 0 ? '−' : '') + moneyShortTop(Math.abs(n)) + " so'm";
+  const v = n / fx; return (v < 0 ? '−' : '') + (CCY[adCcy()] ?? '') + (Math.abs(v) >= 100 ? num(Math.abs(v)) : Math.abs(v).toFixed(2)); };
+const ccyToggle = () => fxRate() && adCcy() !== 'UZS' ? `<div class="inline-flex p-1 bg-surface border border-line rounded-xl text-xs font-semibold" title="Valyuta">${[['ad', CCY[adCcy()] || adCcy()], ['UZS', "so'm"]].map(([k, t]) => `<button onclick="setCcy('${k}')" class="px-2.5 h-7 rounded-lg ${S.ccy === k ? 'bg-accent text-white' : 'text-muted hover:text-fg'}">${t}</button>`).join('')}</div>` : '';
+const attrToggle = () => segBtn([['last', 'Last click'], ['first', 'First click']], S.attr || 'last', "S.attr='$';render()");
+const ATTR_NOTE = "Last click — sotuv deal ochilgan leadning reklamasiga yoziladi. First click — shu telefon raqamidan kelgan eng birinchi leadning reklamasiga (2026-maydan beri saqlangan leadlar ichida).";
+const fmtPhone = p => { const d = String(p || ''); return d.length === 12 && d.startsWith('998') ? `+998 ${d.slice(3, 5)} ${d.slice(5, 8)} ${d.slice(8, 10)} ${d.slice(10)}` : d ? '+' + d : '—'; };
+const BX_DEAL = id => `https://robbit.bitrix24.kz/crm/deal/details/${id}/`;
+function adCat() { if (S._catSrc !== S.data.adCatalog) { S._catSrc = S.data.adCatalog; S._cat = Object.fromEntries(S.data.adCatalog.map(a => [a.id, a])); } return S._cat; }
+// Sales of the period: by sale date, or by the date of the lead that is credited (first / last click).
+function salesInRange() {
+  const first = (S.attr || 'last') === 'first', bySale = saleMode();
+  return (S.data.purchases || []).map(p => ({ ...p, a_ad: first ? p.first_ad_id : p.ad_id, a_source: first ? p.first_source : p.source, a_day: bySale ? p.day : first ? p.first_day : p.lead_day }))
+    .filter(p => p.a_day && p.a_day >= S.from && p.a_day <= S.to);
+}
+
+// ---------- Ads aggregated to campaign / ad set / ad ----------
+const AD_SUMS = ['spend', 'impr', 'clicks', 'lclicks', 'lpv', 'mleads', 'leads', 'contacted', 'qual', 'came', 'won', 'revenue'];
+function adAgg(level, ids) {
+  const d = S.data, cat = adCat(), ok = id => !ids || ids.has(id);
+  const keyOf = id => { const a = cat[id] || {}; return level === 'ad' ? id : level === 'adset' ? (a.adset || '—') : (a.campaign || '—'); };
+  const by = {}, zero = () => Object.fromEntries(AD_SUMS.map(x => [x, 0]));
+  const get = id => { const k = keyOf(id), a = cat[id] || {}; return by[k] ??= { key: k, name: level === 'ad' ? (a.name || id) : k, thumb: level === 'ad' ? a.thumb : null, adset: a.adset, campaign: a.campaign, branch: a.branch, active: false, ...zero() }; };
+  for (const r of d.adDaily) if (ok(r.ad_id)) { const o = get(r.ad_id); o.spend += +r.spend; o.impr += +r.impressions; o.clicks += +r.clicks; o.lclicks += +(r.link_clicks || 0); o.lpv += +(r.lpv || 0); o.mleads += +(r.results ?? r.leads); }
+  for (const r of d.adLeads) if (ok(r.ad_id)) { const o = get(r.ad_id); o.leads += +r.leads; o.qual += +r.qual; o.contacted += +(r.contacted || 0); o.came += +(r.came || 0); }
+  for (const p of salesInRange()) if (p.a_ad && ok(p.a_ad)) { const o = get(p.a_ad); o.won++; o.revenue += +p.amount || 0; }
+  for (const a of d.adCatalog) if (a.status === 'ACTIVE' && by[keyOf(a.id)]) by[keyOf(a.id)].active = true;
+  const rows = Object.values(by).filter(o => o.spend > 0 || o.leads > 0 || o.won > 0);
+  const T = rows.reduce((t, o) => { for (const k of AD_SUMS) t[k] += o[k]; return t; }, { _foot: true, name: 'Jami', ...zero() });
+  return { rows, T };
+}
+const adM = o => { const fx = fxRate(), lc = o.lclicks || o.clicks; return { ctr: div(lc, o.impr), cpc: div(o.spend, lc), cpm: o.impr ? o.spend / o.impr * 1000 : null, cplpv: div(o.spend, o.lpv), cpl: div(o.spend, o.mleads), cpql: div(o.spend, o.qual), cps: div(o.spend, o.won), roas: fx && o.spend ? o.revenue / (o.spend * fx) : null, profit: fx ? o.revenue - o.spend * fx : null }; };
+// Every column the ads table can show; `off` = hidden until switched on in «Ustunlar».
+function adColumns(level, T, thumbs = true) {
+  const usd = n => adMoney(n, false), avgCpql = adM(T).cpql, M = k => o => adM(o)[k];
+  const cost = (k, t, off) => ({ k, t, r: 1, off, s: o => M(k)(o) ?? 1e12, f: o => usd(M(k)(o)) });
+  const cnt = (k, t, off) => ({ k, t, r: 1, off, s: o => o[k], f: o => num(o[k]) });
+  return [
+    { k: 'name', fixed: 1, t: level === 'ad' ? "E'lon" : level === 'adset' ? 'Adset' : 'Kampaniya', s: o => o.name, f: o => o._foot ? '<b>Jami</b>' : `<div class="flex items-center gap-3">${level === 'ad' && thumbs ? (o.thumb ? `<img src="${esc(o.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="w-10 h-10 rounded-lg object-cover bg-surface2 shrink-0" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'w-10 h-10 rounded-lg bg-surface2 shrink-0'}))">` : '<div class="w-10 h-10 rounded-lg bg-surface2 shrink-0 grid place-items-center text-muted"><i class="ph ph-image"></i></div>') : ''}<div class="max-w-[260px] min-w-0"><div class="font-semibold truncate" title="${esc(o.name)}">${esc(o.name)}</div><div class="text-[11px] text-muted truncate">${o.active ? '<span style="color:rgb(var(--c-green))">● Faol</span>' : "<span>○ To'xtagan</span>"}${level === 'ad' ? ' · ' + esc(o.adset || '') : level === 'adset' ? ' · ' + esc(o.campaign || '') : ''}</div></div></div>` },
+    { k: 'spend', t: 'Xarajat', r: 1, s: o => o.spend, f: o => usd(o.spend) },
+    cnt('impr', "Ko'rishlar"), cnt('lclicks', 'Link klik', 1),
+    { k: 'ctr', t: 'CTR', r: 1, s: o => M('ctr')(o) ?? -1, f: o => pct(M('ctr')(o)) },
+    cost('cpc', 'CPC'), cost('cpm', 'CPM'),
+    cnt('lpv', "Sahifa ko'rish", 1), cost('cplpv', "Sahifa ko'rish narxi", 1),
+    cnt('mleads', 'Natija (Meta)'), cost('cpl', 'CPL'),
+    cnt('leads', 'Lead (Bitrix)'), cnt('contacted', 'Aloqa', 1),
+    { k: 'qual', t: 'Sifatli', r: 1, s: o => o.qual, f: o => `${num(o.qual)} <span class="text-[11px] text-muted">${pct(div(o.qual, o.leads))}</span>` },
+    { k: 'cpql', t: 'CPQL', r: 1, s: o => M('cpql')(o) ?? 1e12, f: o => o._foot || M('cpql')(o) == null ? usd(M('cpql')(o)) : chip(usd(M('cpql')(o)), M('cpql')(o) <= avgCpql ? 'success' : 'danger') },
+    cnt('came', 'Filialga keldi', 1), cnt('won', 'Sotuv'), cost('cps', 'Sotuv narxi'),
+    { k: 'revenue', t: 'Tushum', r: 1, s: o => o.revenue, f: o => somMoney(o.revenue) },
+    { k: 'profit', t: 'Foyda', r: 1, s: o => M('profit')(o) ?? -1e15, f: o => { const v = M('profit')(o); return v == null ? '—' : `<span class="${v < 0 ? 'text-danger' : 'text-success'} font-semibold">${somMoney(v)}</span>`; } },
+    { k: 'roas', t: 'ROAS', r: 1, s: o => M('roas')(o) ?? -1, f: o => M('roas')(o) == null ? '—' : M('roas')(o).toFixed(2) + '×' },
+  ];
+}
+const adColOn = c => c.fixed || (adColsPref[c.k] ?? !c.off);
+function toggleAdCol(k, on) { adColsPref[k] = on; try { localStorage.setItem('audit-adcols', JSON.stringify(adColsPref)); } catch {} render(); }
+
+function creatives() {
+  const A = S.ad, { rows: all, T } = adAgg(A.level);
+  let rows = all;
+  const counts = { active: rows.filter(o => o.active).length, paused: rows.filter(o => !o.active).length, all: rows.length };
+  if (A.status !== 'all') rows = rows.filter(o => A.status === 'active' ? o.active : !o.active);
+  if (A.q) { const t = A.q.toLowerCase(); rows = rows.filter(o => [o.name, o.adset, o.campaign].some(x => String(x || '').toLowerCase().includes(t))); }
+  const colsAll = adColumns(A.level, T), cols = colsAll.filter(adColOn), key = cols.map(c => c.t).join('|');
+  if (!S.sort[key]) rows = [...rows].sort((a, b) => b.spend - a.spend);
+  const Tf = rows.reduce((t, o) => { for (const k of AD_SUMS) t[k] += o[k]; return t; }, { _foot: true, name: 'Jami', ...Object.fromEntries(AD_SUMS.map(x => [x, 0])) });
+  const chooser = `<details class="relative"><summary class="list-none cursor-pointer h-9 px-3 rounded-xl bg-surface2 text-sm font-semibold inline-flex items-center gap-1.5"><i class="ph-bold ph-columns"></i>Ustunlar ${cols.length - 1}/${colsAll.length - 1}</summary><div class="absolute z-20 mt-2 right-0 w-64 max-h-96 overflow-y-auto bg-surface border border-line rounded-2xl shadow-card p-3 space-y-1">${colsAll.filter(c => !c.fixed).map(c => `<label class="flex items-center gap-2 text-sm py-0.5"><input type="checkbox" ${adColOn(c) ? 'checked' : ''} onchange="toggleAdCol('${c.k}',this.checked)" class="w-4 h-4">${c.t}</label>`).join('')}</div></details>`;
+  const more = rows.length > A.limit ? `<div class="mt-4 flex items-center gap-3"><button onclick="S.ad.limit+=20;render()" class="h-9 px-4 rounded-xl bg-surface2 text-sm font-semibold">Yana 20 ta</button><span class="text-xs text-muted">${A.limit} / ${rows.length} ko'rsatildi</span></div>` : '';
+  return `<div class="flex flex-wrap items-center gap-3 mb-4">${dateToggle()}${attrToggle()}</div>` + card(`<div class="flex flex-wrap items-center gap-3 mb-4">
+      ${segBtn([['active', `Faol ${counts.active}`], ['paused', `To'xtagan ${counts.paused}`], ['all', `Hammasi ${counts.all}`]], A.status, "S.ad.status='$';S.ad.limit=20;render()")}
+      ${segBtn([['ad', "E'lonlar"], ['adset', 'Adsetlar'], ['campaign', 'Kampaniyalar']], A.level, "S.ad.level='$';S.ad.limit=20;render()")}
+      ${chooser}
+      <input value="${esc(A.q)}" placeholder="Qidirish…" onchange="S.ad.q=this.value;S.ad.limit=20;render()" class="h-9 px-3 rounded-xl bg-surface2 border border-line text-sm w-full sm:w-56 ml-auto">
+    </div>` + h3('Kreativlar samaradorligi', `CTR va CPC — link klik bo'yicha. Tushum va foyda so'mdagi deal summasidan, xarajat kurs bo'yicha so'mga o'tkaziladi. ${ATTR_NOTE}`) +
+    table(cols, rows, Tf, A.limit) + more);
+}
+
+// ---------- Funnel of one campaign / ad set / ad ----------
+function adFunnel() {
+  const cat = adCat(), F = S.af ||= { c: '', s: '', a: '' }, used = new Set([...S.data.adDaily.map(r => r.ad_id), ...S.data.adLeads.map(r => r.ad_id)]);
+  const ads = [...used].map(id => ({ id, ...(cat[id] || {}) }));
+  const camps = uniq(ads.map(a => a.campaign)), sets = uniq(ads.filter(a => !F.c || a.campaign === F.c).map(a => a.adset));
+  const adList = ads.filter(a => (!F.c || a.campaign === F.c) && (!F.s || a.adset === F.s)).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const ids = new Set(adList.filter(a => !F.a || a.id === F.a).map(a => a.id));
+  const o = adAgg('campaign', ids).T, m = adM(o), usd = n => adMoney(n, false);
+  const sel = (k, label, items, cur) => `<label class="block min-w-0"><span class="block text-xs font-semibold mb-1.5">${label}</span><select onchange="S.af.${k}=this.value;${k === 'c' ? "S.af.s='';S.af.a='';" : k === 's' ? "S.af.a='';" : ''}render()" class="w-full sm:w-64 h-10 px-3 rounded-xl bg-surface2 border border-line text-sm">${['', ...items].map(v => { const [val, txt] = Array.isArray(v) ? v : [v, v]; return `<option value="${esc(val)}" ${val === cur ? 'selected' : ''}>${val ? esc(txt) : 'Hammasi'}</option>`; }).join('')}</select></label>`;
+  const steps = [['Ko\'rishlar', o.impr, 'CPM', m.cpm], ['Link klik', o.lclicks || o.clicks, 'CPC', m.cpc], ...(o.lpv ? [["Sahifa ko'rish", o.lpv, 'narxi', m.cplpv]] : []), ['Natija (Meta)', o.mleads, 'CPL', m.cpl],
+    ["Lead (Bitrix)", o.leads, 'narxi', div(o.spend, o.leads)], ['Aloqa qilindi', o.contacted, '', null], ['Sifatli', o.qual, 'CPQL', m.cpql], ['Filialga keldi', o.came, 'narxi', div(o.spend, o.came)], ['Sotuv', o.won, 'CPP', m.cps]];
+  const COL = ['blue', 'blue', 'violet', 'violet', 'violet', 'teal', 'teal', 'amber', 'green'];
+  const bars = steps.map(([l, v, cl, cv], i) => {
+    const prev = i ? steps[i - 1][1] : v, conv = div(v, prev), w = Math.max(Math.pow(div(v, steps[0][1]) || 0, 0.25) * 100, 12).toFixed(1);
+    return (i ? `<div class="flex justify-center my-1"><span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold tabular-nums bg-surface2 text-muted"><i class="ph-bold ph-arrow-down"></i>${pct(conv)}</span></div>` : '') +
+      `<div class="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] items-center gap-3"><div class="text-sm font-semibold">${l}</div><div class="flex justify-center"><div class="h-10 rounded-xl flex items-center justify-center text-white font-bold tabular-nums" style="width:${w}%;background:rgb(var(--c-${COL[i % COL.length]}))">${num(v)}</div></div><div class="text-right text-sm">${cl && cv != null ? `<div class="font-semibold tabular-nums">${usd(cv)}</div><div class="text-[11px] text-muted">${cl}</div>` : ''}</div></div>`;
+  }).join('');
+  return card(`<div class="flex flex-wrap gap-3 mb-5">${sel('c', 'Kampaniya', camps, F.c)}${sel('s', 'Ad set', sets, F.s)}${sel('a', "E'lon", adList.map(a => [a.id, a.name || a.id]), F.a)}</div>` +
+    `<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">${kpiTile('Xarajat', usd(o.spend), '', 'blue')}${kpiTile('Tushum', somMoney(o.revenue), `${num(o.won)} ta sotuv`, 'green')}${kpiTile('Foyda', somMoney(m.profit), 'tushum − xarajat', m.profit < 0 ? 'rose' : 'green')}${kpiTile('ROAS', m.roas == null ? '—' : m.roas.toFixed(2) + '×', "1 so'm reklamaga tushum", 'amber')}</div>` +
+    h3('Reklama voronkasi', "Ko'rishdan sotuvgacha. Meta bosqichlari — xarajat kunlari, Bitrix bosqichlari — tanlangan davrda kelgan leadlar. Sotuv — tanlangan sana va atributsiya bo'yicha.") + bars);
+}
+
+// ---------- Sales list (won deals) ----------
+function purchasesPage() {
+  const cat = adCat(), Q = (S.pq || '').toLowerCase().replace(/\s/g, '');
+  let rows = salesInRange().filter(p => !S.source || channelOf(p.a_source) === S.source);
+  const all = rows;
+  if (Q) rows = rows.filter(p => [p.name, p.phone, p.deal_title, p.deal_id, p.lead_id].some(x => String(x || '').toLowerCase().replace(/\s/g, '').includes(Q)));
+  const rev = all.reduce((a, p) => a + (+p.amount || 0), 0), days = Math.round((new Date(S.to) - new Date(S.from)) / 864e5) + 1;
+  const timed = all.filter(p => p.deal_days != null && p.deal_days >= 0), avgDays = avgOf(timed, p => +p.deal_days);
+  const group = (keyFn, rowsIn = all) => { const by = {}; for (const p of rowsIn) { const k = keyFn(p); if (!k) continue; const o = by[k] ??= { key: k, n: 0, rev: 0, days: [] }; o.n++; o.rev += +p.amount || 0; if (p.deal_days != null && p.deal_days >= 0) o.days.push(+p.deal_days); } return Object.values(by); };
+  const fastest = group(p => cat[p.a_ad]?.campaign).filter(o => o.n >= 2).map(o => ({ ...o, avg: o.days.length ? o.days.reduce((a, b) => a + b, 0) / o.days.length : null })).filter(o => o.avg != null).sort((a, b) => a.avg - b.avg)[0];
+  const spendBy = level => { const r = {}; for (const x of S.data.adDaily) { const a = cat[x.ad_id] || {}, k = level === 'ad' ? x.ad_id : level === 'adset' ? a.adset : a.campaign; if (k) r[k] = (r[k] || 0) + +x.spend; } return r; };
+  const topTable = (title, level) => { const sp = spendBy(level), fx = fxRate(); const list = group(p => p.a_ad ? (level === 'ad' ? p.a_ad : level === 'adset' ? cat[p.a_ad]?.adset : cat[p.a_ad]?.campaign) || null : null).map(o => ({ ...o, name: level === 'ad' ? (cat[o.key]?.name || o.key) : o.key, spend: sp[o.key] || 0 })).map(o => ({ ...o, roas: fx && o.spend ? o.rev / (o.spend * fx) : null })).sort((a, b) => b.n - a.n || b.rev - a.rev);
+    return card(h3(title) + table([{ t: 'Nomi', f: o => `<span class="font-semibold block max-w-[240px] truncate" title="${esc(o.name)}">${esc(o.name)}</span>` }, { t: 'Sotuv', r: 1, s: o => o.n, f: o => num(o.n) }, { t: 'Tushum', r: 1, s: o => o.rev, f: o => somMoney(o.rev) }, { t: 'Xarajat', r: 1, s: o => o.spend, f: o => adMoney(o.spend, false) }, { t: 'ROAS', r: 1, s: o => o.roas ?? -1, f: o => o.roas == null ? '—' : chip(o.roas.toFixed(2) + '×', o.roas >= 1 ? 'success' : 'danger') }], list, null, 10), 'mb-6'); };
+  const sellers = group(p => p.manager).map(o => ({ ...o, avg: o.days.length ? o.days.reduce((a, b) => a + b, 0) / o.days.length : null })).sort((a, b) => b.rev - a.rev);
+  const chans = group(p => channelOf(p.a_source)).sort((a, b) => b.n - a.n), maxN = Math.max(1, ...chans.map(o => o.n));
+  const listCols = [
+    { t: 'Mijoz', s: p => p.name || '', f: p => `<div class="min-w-0 max-w-[220px]"><a href="${BX_DEAL(p.deal_id)}" target="_blank" rel="noopener" class="font-semibold hover:text-accent block truncate" title="${esc(p.name || p.deal_title || '')}">${esc(p.name || p.deal_title || 'Deal #' + p.deal_id)}</a><div class="text-[11px] text-muted tabular-nums">${fmtPhone(p.phone)}${p.lead_id ? ` · <a href="${BX_LEAD(p.lead_id)}" target="_blank" rel="noopener" class="hover:text-accent">#${p.lead_id}</a>` : ''}</div></div>` },
+    { t: 'Manba', s: p => p.a_source, f: p => `<div class="text-[13px]">${esc(channelOf(p.a_source))}</div><div class="text-[11px] text-muted max-w-[140px] truncate">${esc(p.a_source || '')}</div>` },
+    { t: 'Kampaniya', f: p => `<span class="block max-w-[200px] truncate text-[13px]" title="${esc(cat[p.a_ad]?.campaign || '')}">${esc(cat[p.a_ad]?.campaign || '—')}</span>` },
+    { t: 'Ad set', f: p => `<span class="block max-w-[180px] truncate text-[13px]" title="${esc(cat[p.a_ad]?.adset || '')}">${esc(cat[p.a_ad]?.adset || '—')}</span>` },
+    { t: "E'lon", f: p => `<span class="block max-w-[140px] truncate text-[13px]" title="${esc(cat[p.a_ad]?.name || '')}">${esc(cat[p.a_ad]?.name || (p.a_ad ? '#' + p.a_ad : '—'))}</span>` },
+    { t: 'Menejer', f: p => `<span class="block max-w-[160px] truncate text-[13px]">${esc(String(p.manager || '—').split('|')[0].trim())}</span>` },
+    { t: 'Summa', r: 1, s: p => +p.amount, f: p => somMoney(+p.amount) },
+    { t: 'Muddat', r: 1, s: p => p.deal_days ?? 1e9, f: p => p.deal_days == null ? '—' : p.deal_days < 1 ? '< 1 kun' : `${(+p.deal_days).toFixed(1)} kun` },
+    { t: 'Yopilgan', s: p => p.sold_at, f: p => `<span class="tabular-nums text-[13px]">${String(p.day).slice(8, 10)}.${String(p.day).slice(5, 7)} ${new Date(p.sold_at).toLocaleTimeString('uz', { hour: '2-digit', minute: '2-digit' })}</span>` },
+  ];
+  const listKey = listCols.map(c => c.t).join('|'), sorted = S.sort[listKey] ? rows : [...rows].sort((a, b) => String(b.sold_at).localeCompare(String(a.sold_at)));
+  return `<div class="flex flex-wrap items-center justify-between gap-3 mb-4">${channelPills()}<div class="flex flex-wrap gap-2">${dateToggle()}${attrToggle()}</div></div>
+    <div class="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-6">${kpiTile('Tushum', somMoney(rev), `${num(all.length)} ta sotuv`, 'green')}${kpiTile('Sotuvlar', num(all.length), saleMode() ? 'shu davrda yopilgan' : 'shu davr leadlaridan', 'blue')}${kpiTile("O'rtacha chek", somMoney(div(rev, all.length)), '', 'violet')}${kpiTile("O'rtacha muddat", avgDays == null ? '—' : avgDays.toFixed(1) + ' kun', 'lead kelgandan sotuvgacha', 'amber')}${kpiTile('Eng tez kampaniya', fastest ? fastest.avg.toFixed(1) + ' kun' : '—', fastest ? esc(fastest.key) : 'kamida 2 ta sotuv kerak', 'teal')}${kpiTile('Kuniga tushum', somMoney(div(rev, days)), `${days} kun ichida`, 'rose')}</div>` +
+    sections('purch', [
+      ['list', 'Sotuvlar', () => card(`<div class="flex flex-wrap items-center gap-3 mb-3"><input value="${esc(S.pq || '')}" placeholder="Ism, telefon yoki deal raqami…" onchange="S.pq=this.value;render()" class="h-9 px-3 rounded-xl bg-surface2 border border-line text-sm w-full sm:w-72"><span class="text-xs text-muted ml-auto">${num(rows.length)} ta · ${ATTR_NOTE}</span></div>` + table(listCols, sorted, null, null, true))],
+      ['top', 'Eng yaxshilari', () => `<div class="grid lg:grid-cols-2 gap-4">${topTable('Kampaniyalar', 'campaign')}${topTable('Ad setlar', 'adset')}${topTable("E'lonlar", 'ad')}${card(h3('Sotuvchilar', 'Deal egasi (filial menejeri)') + table([{ t: 'Menejer', f: o => `<span class="font-semibold">${esc(String(o.key).split('|')[0].trim())}</span><div class="text-[11px] text-muted">${esc(String(o.key).split('|').slice(1).join(' ').trim())}</div>` }, { t: 'Sotuv', r: 1, s: o => o.n, f: o => num(o.n) }, { t: 'Tushum', r: 1, s: o => o.rev, f: o => somMoney(o.rev) }, { t: "O'rtacha muddat", r: 1, s: o => o.avg ?? 1e9, f: o => o.avg == null ? '—' : o.avg.toFixed(1) + ' kun' }], sellers, null, 10), 'mb-6')}</div>`],
+      ['src', 'Manbalar', () => card(h3('Sotuvlar qayerdan kelgan', 'Kanal — Mapping bo\'yicha') + chans.map(o => `<div class="flex items-center justify-between gap-3 py-2 border-b border-line/60 last:border-0 text-[13px]"><span class="w-40 shrink-0 font-semibold">${esc(o.key)}</span>${bar(o.n, maxN, 'blue', `${num(o.n)} · ${pct(div(o.n, all.length))}`)}<span class="w-32 text-right tabular-nums">${somMoney(o.rev)}</span></div>`).join('') || empty("Sotuv yo'q"))],
+    ]);
+}
+
+// ---------- PDF report ----------
+const REP_DEFAULT = ['spend', 'impr', 'lclicks', 'ctr', 'cpc', 'cpm', 'leads', 'qual', 'cpql', 'won', 'revenue', 'roas'];
+function reportPage() {
+  const R = S.rep ||= { level: 'campaign', keys: new Set(REP_DEFAULT), q: '' };
+  let { rows, T } = adAgg(R.level);
+  if (R.q) { const t = R.q.toLowerCase(); rows = rows.filter(o => [o.name, o.adset, o.campaign].some(x => String(x || '').toLowerCase().includes(t))); T = rows.reduce((t, o) => { for (const k of AD_SUMS) t[k] += o[k]; return t; }, { _foot: true, name: 'Jami', ...Object.fromEntries(AD_SUMS.map(x => [x, 0])) }); }
+  rows = [...rows].sort((a, b) => b.spend - a.spend);
+  const colsAll = adColumns(R.level, T, false), cols = colsAll.filter(c => c.fixed || R.keys.has(c.k));
+  const box = c => `<label class="inline-flex items-center gap-2 text-sm mr-4 mb-1"><input type="checkbox" ${R.keys.has(c.k) ? 'checked' : ''} onchange="S.rep.keys[this.checked?'add':'delete']('${c.k}');render()" class="w-4 h-4">${c.t}</label>`;
+  return `<div class="no-print">` + card(`<div class="flex flex-wrap items-center gap-3 mb-4">${segBtn([['campaign', 'Kampaniyalar'], ['adset', 'Ad setlar'], ['ad', "E'lonlar"]], R.level, "S.rep.level='$';render()")}${dateToggle()}${attrToggle()}<input value="${esc(R.q)}" placeholder="Nomi bo'yicha filtr…" onchange="S.rep.q=this.value;render()" class="h-9 px-3 rounded-xl bg-surface2 border border-line text-sm w-full sm:w-56"><button onclick="window.print()" class="h-9 px-4 rounded-xl bg-fg text-surface text-sm font-semibold ml-auto inline-flex items-center gap-1.5"><i class="ph-bold ph-file-pdf"></i>PDF yuklab olish</button></div>
+    <div class="text-xs font-semibold mb-2">Ko'rsatkichlar</div><div>${colsAll.filter(c => !c.fixed).map(box).join('')}</div>
+    <p class="text-[11px] text-muted mt-3">«PDF yuklab olish» → ochilgan oynada «Saqlash: PDF» ni tanlang. Davrni yuqoridagi kalendardan o'zgartiring.</p>`, 'mb-6') + `</div>` +
+    card(`<div class="flex flex-wrap items-end justify-between gap-3 mb-4"><div><div class="text-lg font-bold">Reklama hisoboti — Robbit akademiyasi</div><div class="text-xs text-muted">${fmtDay(S.from)} — ${fmtDay(S.to)} · ${{ campaign: 'kampaniyalar', adset: 'ad setlar', ad: "e'lonlar" }[R.level]} bo'yicha · ${(S.attr || 'last') === 'first' ? 'First click' : 'Last click'} · ${saleMode() ? 'sotuv sanasi' : 'lead sanasi'}</div></div><div class="text-xs text-muted">Tayyorlandi: ${new Date().toLocaleString('uz')}</div></div>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">${kpiTile('Xarajat', adMoney(T.spend, false), '', 'blue')}${kpiTile('Lead (Bitrix)', num(T.leads), `sifatli ${num(T.qual)}`, 'violet')}${kpiTile('Sotuv', num(T.won), somMoney(T.revenue), 'green')}${kpiTile('ROAS', adM(T).roas == null ? '—' : adM(T).roas.toFixed(2) + '×', `foyda ${somMoney(adM(T).profit)}`, 'amber')}</div>` +
+    table(cols, rows, T, 100000, true), 'print-area');
+}
+
+const VIEWS = { purchases: purchasesPage, report: reportPage, integr: integrPage, mapping: mappingPage, plan: planPage, geo: geoPage, economy: economyPage, tasks: tasksPage, overview, funnel, daily, leads, money: moneyPage, cohort, creatives, pains, managers, calls, speed: speedPage, metrics: metricsPage, branches: branchesPage, status: statusPage, guide: guidePage, briefs, ai, settings, users: usersPage };
 function render() { $('app').innerHTML = shell(S.data.funnel ? VIEWS[S.page]() : card(empty('Yuklanmoqda…'))); }
 // Starts the Meta / Bitrix / call syncs now (sync-now waits up to ~55 s), then reloads the data.
 async function syncNow() {
