@@ -280,7 +280,7 @@ function goPage(k) {
 function merged(id, items) {
   S.sec ||= {};
   const cur = items.find(i => i[0] === S.sec[id]) || items[0];
-  return `<div class="flex flex-wrap gap-2 mb-5">${items.map(([k, t, i]) => `<button onclick="S.sec['${id}']='${k}';S.call=null;S.op=null;render();scrollTo(0,0)" class="h-10 px-4 rounded-xl text-sm font-semibold inline-flex items-center gap-2 ${cur[0] === k ? 'bg-fg text-surface' : 'bg-surface text-muted hover:text-fg border border-line'}"><i class="ph-bold ${i}"></i>${t}</button>`).join('')}</div>` + cur[2]();
+  return `<div class="flex flex-wrap gap-2 mb-5">${items.map(([k, t, i]) => `<button onclick="S.sec['${id}']='${k}';S.call=null;S.op=null;render();scrollTo(0,0)" class="h-10 px-4 rounded-xl text-sm font-semibold inline-flex items-center gap-2 ${cur[0] === k ? 'bg-fg text-surface' : 'bg-surface text-muted hover:text-fg border border-line'}"><i class="ph-bold ${i}"></i>${t}</button>`).join('')}</div>` + cur[3]();
 }
 function shell(body) {
   const d = S.data, title = (PAGES.find(p => p[0] === S.page) || [])[1] || '';
