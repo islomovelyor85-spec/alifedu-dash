@@ -1,8 +1,9 @@
 // Bitrix24 → leads + deals, incremental by DATE_MODIFY, resumable across invocations.
 //   POST /sync-bitrix           hourly: from last cursor (10 min overlap)
 //   POST /sync-bitrix?days=90   backfill (restarts both sources from now − 90d)
+//   POST /sync-bitrix?stages=1  every deal stage move since leads_from (by ID cursor; started after each hourly run)
 // A run that hits the time budget saves its position and re-invokes itself.
-import { Any, authorized, daysAgo, getState, json, sb, setState, upsert } from "../_shared/sync.ts";
+import { Any, authorized, daysAgo, getState, json, sb, setState, sleep, upsert } from "../_shared/sync.ts";
 import { bx, bxPage } from "../_shared/bitrix.ts";
 
 const BUDGET_MS = 110_000;
@@ -19,6 +20,36 @@ Deno.serve(async (req) => {
   if (!authorized(req)) return json({ error: "forbidden" }, 403);
   const deadline = Date.now() + BUDGET_MS;
   const days = +(new URL(req.url).searchParams.get("days") ?? 0) || 0;
+  const self = (qs = "") => EdgeRuntime.waitUntil(fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/sync-bitrix${qs}`, {
+    method: "POST",
+    headers: { "x-cron-secret": req.headers.get("x-cron-secret")!, authorization: req.headers.get("authorization") ?? "" },
+  }));
+  if (new URL(req.url).searchParams.get("stages")) {
+    // Stage history: read only, 50 moves per call, resumes from the last saved ID.
+    const sh: Any = await getState("bitrix_stage_history");
+    try {
+      const { data: cfg } = await sb.from("audit_settings").select("leads_from").eq("id", 1).single();
+      const from = cfg?.leads_from ? `${cfg.leads_from}T00:00:00+05:00` : daysAgo(200).toISOString();
+      let lastId = +sh.last_id || 0, n = 0, more = true;
+      while (Date.now() < deadline) {
+        const body = await bx("crm.stagehistory.list", { entityTypeId: 2, order: { ID: "ASC" }, select: ["ID", "OWNER_ID", "STAGE_ID", "CREATED_TIME"],
+          filter: { ">ID": lastId, ">=CREATED_TIME": from } });
+        const items = body.result?.items ?? [];
+        if (items.length) await upsert("deal_stage_history", items.map((r: Any) => ({ id: +r.ID, deal_id: +r.OWNER_ID, stage: r.STAGE_ID, at: r.CREATED_TIME })), "id");
+        n += items.length;
+        if (items.length) lastId = +items[items.length - 1].ID;
+        if (items.length < 50) { more = false; break; }
+        await setState("bitrix_stage_history", { ...sh, last_id: lastId, last_run_at: new Date().toISOString(), last_error: null });
+        await sleep(500);
+      }
+      await setState("bitrix_stage_history", { ...sh, last_id: lastId, last_run_at: new Date().toISOString(), last_error: null });
+      if (more) self("?stages=1");
+      return json({ ok: true, stage_history: n, more });
+    } catch (e) {
+      await setState("bitrix_stage_history", { ...sh, last_run_at: new Date().toISOString(), last_error: String(e) }).catch(() => {});
+      return json({ error: String(e) }, 500);
+    }
+  }
   try {
     const { data: cfg } = await sb.from("audit_settings").select("*").eq("id", 1).single();
     const qual: string[] = cfg?.qual_statuses ?? [], won: string[] = cfg?.won_stages ?? [], lost: string[] = cfg?.lost_stages ?? [];
@@ -144,13 +175,8 @@ Deno.serve(async (req) => {
     }
 
     await sb.rpc("refresh_audit_derived");
-    if (!done) {
-      // Continue in a fresh invocation (no ?days, so it resumes instead of restarting).
-      EdgeRuntime.waitUntil(fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/sync-bitrix`, {
-        method: "POST",
-        headers: { "x-cron-secret": req.headers.get("x-cron-secret")!, authorization: req.headers.get("authorization") ?? "" },
-      }));
-    }
+    // Continue in a fresh invocation (no ?days, so it resumes instead of restarting); when done, pick up new stage moves.
+    self(done ? "?stages=1" : "");
     return json({ ok: true, done, ...result });
   } catch (e) {
     for (const s of ["bitrix_leads", "bitrix_deals"]) {

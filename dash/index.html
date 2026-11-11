@@ -23,6 +23,11 @@
   .dark .nav-item.active { background: rgb(var(--accent) / .14); color: rgb(var(--fg)); box-shadow: none; }
   .dark .nav-item.active i { color: rgb(var(--accent)); }
   .hero { background: rgb(var(--fg)); color: rgb(var(--surface)); }
+  .glow { position: relative; background: rgb(var(--surface)); overflow: hidden; }
+  .glow::before { content: ''; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(120% 80% at 100% 0%, rgb(var(--accent) / .10), transparent 60%); }
+  .glow > * { position: relative; }
+  .gridbg { background-image: linear-gradient(rgb(var(--line) / .5) 1px, transparent 1px), linear-gradient(90deg, rgb(var(--line) / .5) 1px, transparent 1px); background-size: 22px 22px; }
+  .num-xl { font-feature-settings: 'tnum' 1, 'ss01' 1; letter-spacing: -.02em; }
   .dark .hero { background: rgb(var(--surface)); color: rgb(var(--fg)); }
   .no-scrollbar::-webkit-scrollbar { display: none; }
   td, th { white-space: nowrap; }
@@ -174,7 +179,7 @@ function calendar() {
 // Sidebar: every screen is listed directly, under a group title. Nothing is hidden behind a parent page.
 const NAV = ADMIN ? [['', [['status', 'Holat', 'ph-pulse'], ['integr', 'Ulanishlar', 'ph-plugs-connected'], ['mapping', 'Mapping', 'ph-sliders-horizontal'], ['settings', 'Sozlamalar', 'ph-gear'], ['users', 'Foydalanuvchilar', 'ph-user-gear']]]] : [
   ['', [['overview', 'Umumiy', 'ph-squares-four'], ['funnel', 'Voronka', 'ph-funnel'], ['branches', 'Filiallar', 'ph-buildings']]],
-  ['Manbalar', [['daily', 'Kanallar va kunlar', 'ph-calendar-dots'], ['leads', 'Lead tahlili', 'ph-user-list']]],
+  ['Manbalar', [['daily', 'Kunlar', 'ph-calendar-dots'], ['leads', 'Lead tahlili', 'ph-user-list']]],
   ['Sotuv va pul', [['purchases', 'Sotuvlar', 'ph-receipt'], ['economy', 'Iqtisodiyot', 'ph-coins']]],
   ['Marketing', [['creatives', 'Kreativlar', 'ph-film-strip'], ['geo', 'Lokatsiya isrofi', 'ph-map-pin'], ['briefs', 'Brieflar', 'ph-note-pencil'], ['report', 'Hisobot (PDF)', 'ph-file-pdf']]],
   ['Jamoa', [['managers', 'Menejerlar', 'ph-users'], ['pains', "Og'riqlar va e'tirozlar", 'ph-chat-circle-dots'], ['speed', 'Aloqa tezligi', 'ph-timer'], ['tasks', 'Vazifalar', 'ph-check-square']]],
@@ -258,6 +263,9 @@ async function load() {
   ]);
   S.data = { funnel, courses, cohort, creatives, naming, pains, taxonomy, objections, managers, briefs, cfg, sync, outcomes, sales, users, dealStages, hours, codes, daily, operators, statusOut, cycle, money, lostReasons, cohortSum, cohortSrc, spend, adDaily, adLeads, adCatalog, wonDaily, salesMonth, calls, speed, dm, dmLive, queue, brDaily, brSpend, brCamp, plans, adGeo, economy, tasks, staff, capi, crmMap, crmStatuses };
   const srcName = Object.fromEntries(crmStatuses.filter(r => r.entity === 'SOURCE').map(r => [r.status_id, r.name]));
+  const pr = prevRange(), pday = x => x.gte('day', pr.from).lte('day', pr.to);
+  const [prevDaily, prevSpend, forecast] = await Promise.all([q('v_daily_outcomes', pday), q('v_spend_daily', pday), q('v_deal_forecast')]);
+  Object.assign(S.data, { prevDaily, prevSpend, forecast });
   S.data.purchases = await purchasesP;
   S.data.me = ADMIN ? (await q('admins'))[0] : null;
   S.data.chanMap = Object.fromEntries(crmMap.filter(r => r.kind === 'source').map(r => [srcName[r.code] || r.code, r.value]));
@@ -369,35 +377,150 @@ function overview() {
   if (!t) return card(empty("Tanlangan davrda lead yo'q"));
   return sections('overview', [['kpi', "Ko'rsatkichlar", () => overviewKpi(t)], ['why', 'Reja: sabab va harakat', planWhy], ['set', 'Rejani kiritish', planEditor]]);
 }
-function overviewKpi(t) {
-  const kpi = (l, v, sub, color, hero) => `<div class="${hero ? 'hero' : 'bg-surface'} rounded-3xl p-5"><div class="text-[11px] font-semibold tracking-wide uppercase" style="color:rgb(var(--c-${color}))">${l}</div><div class="text-[28px] leading-tight font-bold mt-1 tabular-nums">${v}</div>${sub ? `<div class="text-[11px] text-muted mt-1">${sub}</div>` : ''}</div>`;
-  const spend = S.data.spend.reduce((a, r) => a + +r.spend, 0), fx = +S.data.cfg?.fx_rate || 0;
-  const paid = groupSum(S.data.daily.filter(r => r.source === 'Target'), () => 't')[0] || { leads: 0, qual: 0, won: 0, revenue: 0 };
-  const metaLeads = S.data.spend.reduce((a, r) => a + +r.meta_leads, 0);
-  const sales = salesList(), sold = sales.length, rev = sales.reduce((a, p) => a + (+p.amount || 0), 0);
-  // A sale = deal now in To'lov qildi, Nabor guruh or Сделка успешна; show where they stand today.
-  const wonStage = countBy(sales, p => p.stage), stageOrder = ["To'lov qildi", 'Nabor guruh', 'Сделка успешна'];
-  const wonStages = Object.entries(wonStage).sort((a, b) => (stageOrder.indexOf(a[0]) + 1 || 9) - (stageOrder.indexOf(b[0]) + 1 || 9)).map(([k, o]) => `${esc({ 'Сделка успешна': 'Muvaffaqiyatli' }[k] || k)}: <b>${num(o.n)}</b>`).join(' · ');
-  const tSales = salesList(true).filter(p => channelOf(p.source) === 'Target'), tRev = tSales.reduce((a, p) => a + (+p.amount || 0), 0);
-  const romi = fx && spend ? div(tRev - spend * fx, spend * fx) : null, months = +S.data.cfg?.avg_months || 0;
-  const romiLtv = fx && spend && months > 1 ? div(tRev * months - spend * fx, spend * fx) : null;
-  const days = Math.round((new Date(S.to) - new Date(S.from)) / 864e5) + 1;
-  const adKpis = spend ? `<div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
-      ${kpi('Reklama xarajati', adMoney(spend), `Meta · ${num(metaLeads)} natija (Results)`, 'amber')}
-      ${kpi('Lead narxi', adMoney(div(spend, paid.leads)), `Target: ${num(paid.leads)} lead Bitrix'da`, 'blue')}
-      ${kpi('Sifatli lead narxi', adMoney(div(spend, paid.qual)), `${num(paid.qual)} ta sifatli Target lead`, 'teal')}
-      ${kpi('Sotuv narxi', adMoney(div(spend, tSales.length)), `${adMoney(spend, false)} ÷ ${num(tSales.length)} ta Target sotuv`, 'green')}
-      ${kpi('ROMI', pct(romi), fx ? `1-oy tushumi bo'yicha. ${months > 1 ? `${months} oy o'qisa: <b>${pct(romiLtv)}</b>` : ''}` : "kurs yo'q", 'violet')}
-    </div>` : `<div class="mb-6 text-xs text-muted">Tanlangan davrda reklama xarajati yo'q.</div>`;
-  return `<div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
-      ${kpi('Jami leadlar', num(t.leads), `${fmtDay(S.from)}${S.from !== S.to ? ' — ' + fmtDay(S.to) : ''} · kuniga ~${num(t.leads / days)}`, 'violet', true)}
-      ${kpi('Sifatli', num(t.qual), pct(div(t.qual, t.leads)) + ' leaddan', 'teal')}
-      ${kpi('Sotuv', num(sold), wonStages || (saleMode() ? "shu davrda to'lov qilganlar" : 'shu davr leadlaridan'), 'green')}
-      ${kpi('Tushum (1-oy)', somMoney(rev), "Xadra, Chimboy — 1 mln, viloyatlar — 700 ming so'm", 'green')}
-      ${kpi('Jarayonda', num(t.in_progress), "hali hal bo'lmagan", 'amber')}
-      ${kpi('Sifatsiz', num(t.junk), pct(div(t.junk, t.leads)) + ' leaddan', 'crimson')}
-    </div>` + planStrip(t, sold, spend) + convBlock(t, sold) + adKpis;
+// ---------- Overview: funnel against plan, money with trend, sale forecast, configurable channels ----------
+function prevRange() { const days = Math.round((new Date(S.to) - new Date(S.from)) / 864e5) + 1, to = addDays(new Date(S.from + 'T00:00'), -1); return { from: iso(addDays(to, -(days - 1))), to: iso(to), days }; }
+const rangeDays = () => { const out = []; for (let d = new Date(S.from + 'T00:00'); iso(d) <= S.to; d = addDays(d, 1)) out.push(iso(d)); return out; };
+function spark(vals, color, w = 120, h = 36) {
+  const v = vals.map(x => x == null || !isFinite(x) ? null : +x), ok = v.filter(x => x != null);
+  if (ok.length < 2) return '';
+  const mx = Math.max(...ok), mn = Math.min(...ok), sx = w / (v.length - 1), y = x => h - 3 - (mx === mn ? .5 : (x - mn) / (mx - mn)) * (h - 6);
+  const pts = v.map((x, i) => x == null ? null : `${(i * sx).toFixed(1)},${y(x).toFixed(1)}`).filter(Boolean).join(' '), id = 'sp' + Math.random().toString(36).slice(2, 8);
+  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" class="shrink-0" preserveAspectRatio="none"><defs><linearGradient id="${id}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="rgb(var(--c-${color}))" stop-opacity=".32"/><stop offset="1" stop-color="rgb(var(--c-${color}))" stop-opacity="0"/></linearGradient></defs><polygon points="0,${h} ${pts} ${w},${h}" fill="url(#${id})"/><polyline points="${pts}" fill="none" stroke="rgb(var(--c-${color}))" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
 }
+// Rolling 7-day ratio per day, so a cost line is not jumping on days with one lead.
+const rolling = (days, numBy, denBy, k = 7) => days.map((d, i) => { let a = 0, b = 0; for (let j = Math.max(0, i - k + 1); j <= i; j++) { a += numBy[days[j]] || 0; b += denBy[days[j]] || 0; } return b ? a / b : null; });
+// Change against the previous period of the same length; lower is better for costs.
+function delta(cur, prev, lowerBetter, fmt) {
+  if (cur == null || prev == null || !prev || !isFinite(cur)) return `<span class="text-[11px] text-muted">oldingi davr: ${prev == null ? '—' : fmt(prev)}</span>`;
+  const d = (cur - prev) / Math.abs(prev), good = lowerBetter ? d < 0 : d > 0;
+  return `<span class="text-[11.5px] font-semibold tabular-nums" style="color:rgb(var(--${Math.abs(d) < 0.005 ? 'muted' : good ? 'success' : 'danger'}))">${d >= 0 ? '↑' : '↓'} ${Math.abs(d * 100).toFixed(1)}%</span> <span class="text-[11px] text-muted">oldin ${fmt(prev)}</span>`;
+}
+function overviewKpi(t) {
+  const d = S.data, fx = +d.cfg?.fx_rate || 0, R = planRange(), days = rangeDays(), pr = prevRange();
+  const spend = d.spend.reduce((a, r) => a + +r.spend, 0), pSpend = (d.prevSpend || []).reduce((a, r) => a + +r.spend, 0);
+  const tgt = rows => groupSum(rows.filter(r => r.source === 'Target'), () => 't')[0] || { leads: 0, qual: 0, won: 0 };
+  const T = tgt(d.daily), pT = tgt(d.prevDaily || []);
+  const sales = salesList(), sold = sales.length, rev = sales.reduce((a, p) => a + (+p.amount || 0), 0);
+  const inRange = (p, f, to) => { const k = saleMode() ? p.day : p.lead_day; return k && k >= f && k <= to; };
+  const pSales = (d.purchases || []).filter(p => inRange(p, pr.from, pr.to) && (!S.source || channelOf(p.source) === S.source));
+  const tSales = salesList(true).filter(p => channelOf(p.source) === 'Target'), pTSales = (d.purchases || []).filter(p => inRange(p, pr.from, pr.to) && channelOf(p.source) === 'Target');
+  const tRev = tSales.reduce((a, p) => a + (+p.amount || 0), 0), pRev = pSales.reduce((a, p) => a + (+p.amount || 0), 0), months = +d.cfg?.avg_months || 0;
+  // Daily series for the trend lines.
+  const by = (rows, f) => rows.reduce((m, r) => (m[r.day] = (m[r.day] || 0) + f(r), m), {});
+  const spendD = by(d.spend, r => +r.spend), tLeadD = by(d.daily.filter(r => r.source === 'Target'), r => +r.leads), tQualD = by(d.daily.filter(r => r.source === 'Target'), r => +r.qual);
+  const tSaleD = tSales.reduce((m, p) => (m[p.mday] = (m[p.mday] || 0) + 1, m), {}), saleD = sales.reduce((m, p) => (m[p.mday] = (m[p.mday] || 0) + 1, m), {}), revD = sales.reduce((m, p) => (m[p.mday] = (m[p.mday] || 0) + (+p.amount || 0), m), {});
+  const usd = v => adMoney(v, false);
+  const mcard = (l, v, sub, line, color, extra = '') => `<div class="glow rounded-3xl p-5 border border-line/60"><div class="flex items-start justify-between gap-3"><div class="min-w-0"><div class="text-[12px] text-muted font-medium">${l}</div><div class="num-xl text-[30px] font-bold leading-tight mt-1 tabular-nums">${v}</div></div>${line}</div><div class="mt-2 leading-snug">${sub}</div>${extra}</div>`;
+  const cpl = div(spend, T.leads), cpql = div(spend, T.qual), cac = div(spend, tSales.length);
+  const romi = fx && spend ? div(tRev - spend * fx, spend * fx) : null, romiLtv = fx && spend && months > 1 ? div(tRev * months - spend * fx, spend * fx) : null;
+  const money = `<div class="grid sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-3">
+    ${mcard('Reklama xarajati', usd(spend), delta(spend, pSpend, false, usd) + (R.budget ? `<span class="text-[11px] text-muted"> · plan ${usd(R.budget)} (${pct(div(spend, R.budget))})</span>` : ''), spark(days.map(x => spendD[x] || 0), 'amber'), 'amber')}
+    ${mcard('Lid narxi (CPL)', usd(cpl), delta(cpl, div(pSpend, pT.leads), true, usd), spark(rolling(days, spendD, tLeadD), 'blue'), 'blue')}
+    ${mcard('Sifatli lid narxi', usd(cpql), delta(cpql, div(pSpend, pT.qual), true, usd), spark(rolling(days, spendD, tQualD), 'teal'), 'teal')}
+    ${mcard('Mijoz narxi (CAC)', usd(cac), delta(cac, div(pSpend, pTSales.length), true, usd), spark(rolling(days, spendD, tSaleD, 14), 'violet'), 'violet')}
+  </div><div class="grid sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
+    ${mcard('Tushum (1-oy)', somMoney(rev), delta(rev, pRev, false, somMoney), spark(days.map(x => revD[x] || 0), 'green'), 'green')}
+    ${mcard('Sotuvlar', num(sold), delta(sold, pSales.length, false, num), spark(days.map(x => saleD[x] || 0), 'green'), 'green')}
+    ${mcard('ROMI (Target)', pct(romi), `<span class="text-[11px] text-muted">1-oy tushumi bo'yicha${romiLtv != null ? ` · ${months} oy o'qisa <b class="text-fg">${pct(romiLtv)}</b>` : ''}</span>`, '', 'violet')}
+    ${mcard("O'rtacha chek", somMoney(div(rev, sold)), `<span class="text-[11px] text-muted">Xadra, Chimboy — 1 mln, viloyatlar — 700 ming so'm (1 oy)</span>`, '', 'green')}
+  </div>`;
+  return funnelPlan(t, sold, R) + money + forecastCard() + channelsCard(R) + `<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6 text-[12.5px]">${[['Aloqa qilingan', t.contacted, t.leads, 'blue'], ['Jarayonda', t.in_progress, t.leads, 'amber'], ['Sifatsiz', t.junk, t.leads, 'rose'], ['Deal ochilgan', t.deals, t.leads, 'violet']].map(([l, n, of, c]) => `<div class="bg-surface rounded-2xl p-3.5 flex items-center justify-between gap-3"><div><div class="text-muted">${l}</div><div class="text-lg font-bold tabular-nums">${num(n)}</div></div><div class="text-right font-semibold tabular-nums" style="color:rgb(var(--c-${c}))">${pct(div(n, of))}</div></div>`).join('')}</div>`;
+}
+// Lead → sifatli → filialga keldi → sotuv, each against the plan for these days, with the step conversions between.
+function funnelPlan(t, sold, R) {
+  const p = R.p, cohort = t.won;
+  const st = [['Lid', t.leads, R.leads, 'blue'], ['Sifatli lid', t.qual, R.qual, 'teal'], ['Filialga keldi', t.came_to_branch, R.came, 'violet'], ['Sotuv', sold, R.sales, 'green']];
+  const conv = [[div(t.qual, t.leads), p && +p.lead_qual], [div(t.came_to_branch, t.qual), p && +p.qual_came], [div(cohort, t.came_to_branch), p && +p.came_sale]];
+  const tone = r => r == null ? 'muted' : r >= 0.9 ? 'success' : r >= 0.7 ? 'warn' : 'danger';
+  const box = ([l, v, plan, c], i) => { const r = plan ? div(v, plan) : null;
+    return `<div class="flex-1 min-w-[150px] rounded-2xl bg-surface2/70 p-4"><div class="flex items-center justify-between gap-2"><span class="text-[12.5px] text-muted font-medium">${l}</span>${r != null ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full tabular-nums" style="color:rgb(var(--${tone(r)}));background:rgb(var(--${tone(r)}) / .12)">${Math.round(r * 100)}%</span>` : ''}</div>
+      <div class="mt-1.5 flex items-baseline gap-2"><span class="num-xl text-[34px] font-bold tabular-nums leading-none">${num(v)}</span>${plan ? `<span class="text-[12px] text-muted tabular-nums">plan ${num(plan)}</span>` : ''}</div>
+      <div class="mt-3 h-1.5 rounded-full bg-line/70 overflow-hidden"><div class="h-full rounded-full" style="width:${Math.min((r ?? 0) * 100, 100).toFixed(1)}%;background:rgb(var(--c-${c}))"></div></div>
+      ${i === 3 && sold !== cohort ? `<div class="text-[10.5px] text-muted mt-2">${num(cohort)} tasi shu davr leadlaridan</div>` : ''}</div>`; };
+  const arrow = ([v, plan]) => { const r = plan ? div(v, plan) : null; return `<div class="flex lg:flex-col items-center justify-center gap-1 px-1 text-center"><i class="ph-bold ph-arrow-right text-muted hidden lg:block"></i><i class="ph-bold ph-arrow-down text-muted lg:hidden"></i><span class="text-[14px] font-bold tabular-nums" style="color:rgb(var(--${tone(r)}))">${pct(v)}</span>${plan ? `<span class="text-[10.5px] text-muted">plan ${pct(plan)}</span>` : ''}</div>`; };
+  const head = `<div class="flex flex-wrap items-center justify-between gap-2 mb-4"><h3 class="font-semibold text-[15px]">Voronka va plan</h3><span class="text-[11.5px] text-muted">${R.has ? `Tanlangan ${rangeDays().length} kunlik plan${R.missing.length ? ` · ${R.missing.map(monthName).join(', ')} uchun plan yo'q` : ''}` : `Plan kiritilmagan — <button onclick="S.sec.overview='set';render()" class="text-accent font-semibold">kiritish</button>`}</span></div>`;
+  return `<div class="glow rounded-3xl p-5 mb-3 border border-line/60">${head}<div class="flex flex-col lg:flex-row gap-2 lg:gap-1 items-stretch">${st.map((x, i) => box(x, i) + (i < 3 ? arrow(conv[i]) : '')).join('')}</div>${planForecastLine()}</div>`;
+}
+function planForecastLine() {
+  const today = iso(new Date()), mKey = today.slice(0, 7) + '-01', cur = S.data.plans.find(x => x.month === mKey);
+  if (S.to !== today || !cur || !+cur.sales) return '';
+  const elapsed = +today.slice(8), dim = new Date(+today.slice(0, 4), +today.slice(5, 7), 0).getDate(), left = dim - elapsed;
+  const mSold = (S.data.purchases || []).filter(p => p.day >= mKey && p.day <= today).length, forecast = Math.round(mSold / elapsed * dim);
+  const pipe = (S.data.forecast || []).reduce((a, r) => a + (+r.prob || 0), 0);
+  return `<div class="mt-4 flex flex-wrap gap-x-6 gap-y-1 text-[12.5px] text-muted"><span><b class="text-fg">${MONTH_FULL[+today.slice(5, 7) - 1]}:</b> ${num(mSold)} ta sotuv, plan ${num(+cur.sales)}</span><span>Shu tezlikda oy oxiri: <b class="text-fg">${num(forecast)}</b> (${pct(div(forecast, +cur.sales))})</span>${left ? `<span>Planga yetish uchun kuniga <b class="text-fg">${num(Math.max(0, Math.ceil((+cur.sales - mSold) / left)))}</b> ta kerak (hozir ${(mSold / elapsed).toFixed(1)})</span>` : ''}${pipe ? `<span>Ochiq deallardan kutilayotgan: <b class="text-fg">~${num(pipe)}</b></span>` : ''}</div>`;
+}
+
+// ---------- Sale forecast from open deals ----------
+function forecastCard() {
+  const rows = (S.data.forecast || []).filter(r => r.prob != null);
+  if (!rows.length) return card(h3('Sotuv ehtimoli', "Bitrix bosqichlar tarixi yuklanmoqda — tayyor bo'lgach, ochiq deallar uchun sotuv ehtimoli shu yerda chiqadi."), 'mb-6');
+  const exp = rows.reduce((a, r) => a + +r.prob, 0), expRev = rows.reduce((a, r) => a + +r.prob * (+r.amount || 0), 0);
+  const byStage = {}; for (const r of rows) { const o = byStage[r.stage_name || r.stage] ??= { n: 0, e: 0 }; o.n++; o.e += +r.prob; }
+  const hot = [...rows].sort((a, b) => b.prob - a.prob || a.days_in_stage - b.days_in_stage);
+  const cold = rows.filter(r => +r.prob < 0.15).length;
+  const F = S.fc ||= { limit: 8 };
+  const probChip = v => `<span class="inline-flex text-[11px] font-bold px-2 py-0.5 rounded-full tabular-nums" style="color:rgb(var(--${v >= 0.5 ? 'success' : v >= 0.2 ? 'warn' : 'danger'}));background:rgb(var(--${v >= 0.5 ? 'success' : v >= 0.2 ? 'warn' : 'danger'}) / .12)">${Math.round(v * 100)}%</span>`;
+  const list = table([
+    { t: 'Mijoz', s: r => r.name || r.title, f: r => `<a href="${BX_DEAL(r.deal_id)}" target="_blank" rel="noopener" class="font-semibold hover:text-accent">${esc(r.name || r.title || '#' + r.deal_id)}</a>${r.phone ? `<div class="text-[11px] text-muted tabular-nums">${fmtPhone(r.phone)}</div>` : ''}` },
+    { t: 'Bosqich', s: r => r.stage_name, f: r => esc(r.stage_name || r.stage) },
+    { t: 'Bosqichda', r: 1, s: r => +r.days_in_stage, f: r => `${num(r.days_in_stage)} kun` },
+    { t: 'Filial', s: r => r.branch || '', f: r => esc(r.branch || '—') },
+    { t: 'Menejer', s: r => r.manager || '', f: r => `<span class="text-[12px]">${esc(String(r.manager || '—').split('|')[0])}</span>` },
+    { t: 'Ehtimol', r: 1, s: r => +r.prob, f: r => probChip(+r.prob) },
+  ], hot, null, F.limit, true);
+  return `<div class="glow rounded-3xl p-5 mb-6 border border-line/60"><div class="flex flex-wrap items-start justify-between gap-4 mb-4"><div><h3 class="font-semibold text-[15px]">Sotuv ehtimoli bor deallar</h3><p class="text-[11.5px] text-muted mt-0.5 max-w-xl">Bitrix bosqichlar tarixidan: shu bosqichda shuncha kun turgan oldingi deallarning nechtasi keyin sotuvga aylangan. Eng yuqori ehtimolli mijozlar tepada — avval shularga qo'ng'iroq qiling.</p></div>
+    <div class="flex gap-6"><div><div class="text-[11px] text-muted">Ochiq deal</div><div class="num-xl text-[26px] font-bold tabular-nums">${num(rows.length)}</div></div><div><div class="text-[11px] text-muted">Kutilayotgan sotuv</div><div class="num-xl text-[26px] font-bold tabular-nums" style="color:rgb(var(--success))">~${num(exp)}</div></div><div><div class="text-[11px] text-muted">Kutilayotgan tushum</div><div class="num-xl text-[26px] font-bold tabular-nums">${somMoney(expRev)}</div></div></div></div>
+    <div class="flex flex-wrap gap-2 mb-4">${Object.entries(byStage).sort((a, b) => b[1].e - a[1].e).map(([k, o]) => `<span class="text-[12px] px-3 py-1.5 rounded-xl bg-surface2">${esc(k)}: <b class="tabular-nums">${num(o.n)}</b> deal → <b class="tabular-nums">~${num(o.e)}</b> sotuv</span>`).join('')}${cold ? `<span class="text-[12px] px-3 py-1.5 rounded-xl" style="background:rgb(var(--danger) / .1);color:rgb(var(--danger))">${num(cold)} ta deal sovib qolgan (ehtimol &lt;15%)</span>` : ''}</div>
+    ${list}${rows.length > F.limit ? `<button onclick="S.fc.limit+=20;render()" class="mt-3 h-9 px-4 rounded-xl bg-surface2 text-sm font-semibold">Yana 20 ta</button>` : ''}</div>`;
+}
+
+// ---------- Channels: the user picks which metrics are columns ----------
+let chColsPref = {}; try { chColsPref = JSON.parse(localStorage.getItem('audit-chcols') || '{}'); } catch {}
+function toggleChCol(k, on) { chColsPref[k] = on; try { localStorage.setItem('audit-chcols', JSON.stringify(chColsPref)); } catch {} render(); }
+const CH_COLS = [
+  { k: 'lp', t: 'Lid / plan', s: o => o.leads, f: o => `<b class="tabular-nums">${num(o.leads)}</b>${o.plan ? ` <span class="text-muted tabular-nums">/ ${num(o.plan)}</span>` : ''}`, csv: o => o.leads },
+  { k: 'pb', t: 'Plan bajarilishi', s: o => div(o.leads, o.plan) ?? -1, f: o => { const r = div(o.leads, o.plan); return o.plan ? `<div class="flex items-center gap-2 min-w-[160px]"><div class="flex-1 h-2 rounded-full bg-surface2 overflow-hidden"><div class="h-2 rounded-full" style="width:${Math.min(r * 100, 100).toFixed(1)}%;background:rgb(var(--${r >= 0.9 ? 'success' : r >= 0.7 ? 'warn' : 'danger'}))"></div></div><span class="text-[11.5px] font-semibold tabular-nums w-10 text-right" style="color:rgb(var(--${r >= 0.9 ? 'success' : r >= 0.7 ? 'warn' : 'danger'}))">${Math.round(r * 100)}%</span></div>` : '<span class="text-muted text-[12px]">plan yo\'q</span>'; }, csv: o => div(o.leads, o.plan) },
+  { k: 'con', t: 'Aloqa', s: o => o.contacted, csv: o => o.contacted, off: 1 },
+  { k: 'conp', t: 'Aloqa %', s: o => div(o.contacted, o.leads) ?? -1, fm: 'pct', csv: o => div(o.contacted, o.leads), off: 1 },
+  { k: 'q', t: 'Sifatli', s: o => o.qual, csv: o => o.qual },
+  { k: 'qp', t: 'Konversiya', hint: 'lid → sifatli', s: o => div(o.qual, o.leads) ?? -1, fm: 'pct', csv: o => div(o.qual, o.leads) },
+  { k: 'came', t: 'Filialga keldi', s: o => o.came, csv: o => o.came, off: 1 },
+  { k: 'qc', t: 'Sifatli → keldi', s: o => div(o.came, o.qual) ?? -1, fm: 'pct', csv: o => div(o.came, o.qual), off: 1 },
+  { k: 'deals', t: 'Deal', s: o => o.deals, csv: o => o.deals, off: 1 },
+  { k: 'sold', t: 'Sotuv', s: o => o.sold, csv: o => o.sold },
+  { k: 'qs', t: 'Sifatli → sotuv', s: o => div(o.cohort, o.qual) ?? -1, fm: 'pct', csv: o => div(o.cohort, o.qual), off: 1 },
+  { k: 'ls', t: 'Lid → sotuv', s: o => div(o.cohort, o.leads) ?? -1, fm: 'pct', csv: o => div(o.cohort, o.leads), off: 1 },
+  { k: 'rev', t: 'Tushum', s: o => o.rev, f: o => somMoney(o.rev), csv: o => o.rev, off: 1 },
+  { k: 'ip', t: 'Jarayonda', s: o => o.in_progress, csv: o => o.in_progress, off: 1 },
+  { k: 'junk', t: 'Sifatsiz %', s: o => div(o.junk, o.leads) ?? -1, fm: 'pct', csv: o => div(o.junk, o.leads), off: 1 },
+  { k: 'sp', t: 'Xarajat', s: o => o.spend ?? -1, f: o => o.spend ? adMoney(o.spend, false) : '—', csv: o => o.spend, off: 1 },
+  { k: 'cpl', t: 'CPL', hint: 'lid narxi', s: o => div(o.spend, o.leads) ?? -1, f: o => o.spend ? adMoney(div(o.spend, o.leads), false) : '—', csv: o => div(o.spend, o.leads), off: 1 },
+  { k: 'cpql', t: 'Sifatli lid narxi', s: o => div(o.spend, o.qual) ?? -1, f: o => o.spend ? adMoney(div(o.spend, o.qual), false) : '—', csv: o => div(o.spend, o.qual), off: 1 },
+  { k: 'cac', t: 'CAC', hint: 'mijoz narxi', s: o => div(o.spend, o.sold) ?? -1, f: o => o.spend ? adMoney(div(o.spend, o.sold), false) : '—', csv: o => div(o.spend, o.sold), off: 1 },
+];
+const chColOn = c => chColsPref[c.k] ?? !c.off;
+function channelRows(R) {
+  const by = {}, blank = key => ({ key, leads: 0, contacted: 0, qual: 0, came: 0, deals: 0, in_progress: 0, junk: 0, cohort: 0, sold: 0, rev: 0, spend: null, plan: 0 });
+  for (const o of groupSum(S.data.daily, r => channelOf(r.source))) Object.assign(by[o.key] ??= blank(o.key), { leads: o.leads, contacted: o.contacted, qual: o.qual, came: o.came_to_branch, deals: o.deals, in_progress: o.in_progress, junk: o.junk, cohort: o.won });
+  for (const p of salesList(true)) { const o = by[channelOf(p.source)] ??= blank(channelOf(p.source)); o.sold++; o.rev += +p.amount || 0; }
+  if (by.Target) by.Target.spend = S.data.spend.reduce((a, r) => a + +r.spend, 0);
+  if (R.p) for (const o of Object.values(by)) o.plan = R.leads * (+(R.p.channels?.[o.key] ?? 0) / 100);
+  return Object.values(by).filter(o => o.leads || o.sold).sort((a, b) => b.leads - a.leads);
+}
+function channelsCard(R) {
+  const rows = channelRows(R), cols = CH_COLS.filter(chColOn);
+  const foot = rows.reduce((t, o) => { for (const k of ['leads', 'contacted', 'qual', 'came', 'deals', 'in_progress', 'junk', 'cohort', 'sold', 'rev', 'plan']) t[k] += o[k]; t.spend = (t.spend || 0) + (o.spend || 0); return t; }, { key: 'Jami', _foot: true, leads: 0, contacted: 0, qual: 0, came: 0, deals: 0, in_progress: 0, junk: 0, cohort: 0, sold: 0, rev: 0, plan: 0, spend: 0 });
+  S._chCsv = () => [['Kanal', ...cols.map(c => c.t)], ...[...rows, foot].map(o => [o.key, ...cols.map(c => { const v = c.csv(o); return v == null ? '' : typeof v === 'number' ? +v.toFixed(4) : v; })])];
+  const chooser = `<details class="relative"><summary class="list-none cursor-pointer h-9 px-3 rounded-xl bg-surface2 text-sm font-semibold inline-flex items-center gap-1.5"><i class="ph-bold ph-sliders-horizontal"></i>Metrikalar ${cols.length}/${CH_COLS.length}</summary><div class="absolute z-20 mt-2 right-0 w-64 max-h-96 overflow-y-auto bg-surface border border-line rounded-2xl shadow-card p-3 space-y-1">${CH_COLS.map(c => `<label class="flex items-center gap-2 text-sm py-0.5"><input type="checkbox" ${chColOn(c) ? 'checked' : ''} onchange="toggleChCol('${c.k}', this.checked)">${c.t}${c.hint ? ` <span class="text-[11px] text-muted">${c.hint}</span>` : ''}</label>`).join('')}</div></details>`;
+  const tcols = [{ t: 'Kanal', s: o => o.key, f: o => o._foot ? '<b>Jami</b>' : `<span class="font-semibold">${esc(o.key)}</span>${o.key === 'Target' ? ' ' + chip('pullik', 'success') : ''}` },
+    ...cols.map(c => ({ t: c.t, r: c.k !== 'pb', s: c.s, f: c.f || (o => { const v = c.s(o); return c.fm === 'pct' ? pct(v < 0 ? null : v) : num(v); }) }))];
+  return `<div class="bg-surface rounded-3xl p-5 mb-6"><div class="flex flex-wrap items-center justify-between gap-3 mb-3"><div><h3 class="font-semibold text-[15px]">Kanallar</h3><p class="text-[11.5px] text-muted">Lid va sifatli — shu davr leadlari. Sotuv — tepadagi sana tanlovi bo'yicha. «Metrikalar»dan kerakli ustunlarni yoqing.</p></div><div class="flex gap-2">${chooser}<button onclick="downloadCsv('kanallar', S._chCsv())" class="h-9 px-3 rounded-xl bg-surface2 text-sm font-semibold inline-flex items-center gap-1.5"><i class="ph-bold ph-download-simple"></i>CSV</button></div></div>${table(tcols, rows, foot)}</div>`;
+}
+function downloadCsv(name, rows) {
+  const text = '﻿' + rows.map(r => r.map(v => { const x = String(v ?? ''); return /[",;\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; }).join(',')).join('\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' })); a.download = `${name}_${S.from}_${S.to}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
 // Step-by-step conversions inside this period's leads (t.won = sales from them), so no step can pass 100%.
 function convBlock(t, allSold) {
   const R = planRange(), p = R.p, sold = t.won;
@@ -755,7 +878,7 @@ function daily() {
   for (const o of bySrc) o.won = soldCh[o.key]?.n || 0;
   for (const k in soldCh) if (!bySrc.some(o => o.key === k)) bySrc.push({ key: k, ...Object.fromEntries(OUT.map(([x]) => [x, 0])), revenue: 0, won: soldCh[k].n });
   tot.won = salesList(true).length; tot._foot = true;
-  const view = S.dailyView || 'src', picked = S.source;
+  const view = 'day', picked = S.source;
   const rate = (o, k) => div(o[k], o.leads);
   // Findings only from sources with enough leads to mean something.
   const big = bySrc.filter(o => o.leads >= 10);
@@ -782,7 +905,7 @@ function daily() {
     : (() => { const ds = groupSum(bySource(rows), r => r.day).sort((a, b) => b.key.localeCompare(a.key)); const [t2] = groupSum(bySource(rows), () => 'all');
       const soldDay = countBy(salesList(), p => p.mday); for (const o of ds) o.won = soldDay[o.key]?.n || 0; if (t2) { t2.won = salesList().length; t2._foot = true; }
       return table(cols('Sana', r => `<span class="font-semibold tabular-nums">${r.key.slice(8)}.${r.key.slice(5, 7)}</span> <span class="text-xs text-muted">${WD[new Date(r.key + 'T00:00').getDay()]}</span>`), ds, t2); })();
-  return card(`<div class="flex flex-wrap items-center gap-3 mb-4">${seg}${view === 'day' ? srcSelect : ''}</div>` +
+  return card(`<div class="flex flex-wrap items-center gap-3 mb-4">${srcSelect}</div>` +
     h3(view === 'src' ? 'Kanallar: qaysi kanal sifatli lead va sotuv beradi' : `Kunlar${picked ? ' — ' + esc(picked) : ''}: qaysi kun leadlari yaxshi ishlandi`,
       "Lead kelgan kun bo'yicha. Foizlar — o'sha qatordagi leadlardan. Yashil/qizil — o'rtachadan yuqori/past. Kanal nomini bosing — o'sha kanalning kunlari ochiladi.") + findings + body);
 }
@@ -1807,7 +1930,7 @@ function reportPage() {
 }
 
 const salesAll = () => merged('m_sales', [['list', 'Sotuvlar ro\'yxati', 'ph-receipt', purchasesPage], ['when', "Sotuv qachon bo'ladi", 'ph-hourglass-medium', cohort], ['money', "To'lovlar va sikl", 'ph-wallet', moneyPage]]);
-const dailyAll = () => merged('m_daily', [['ch', 'Kanallar va kunlar', 'ph-calendar-dots', daily], ['m', 'Kunlik metrikalar', 'ph-chart-bar', metricsPage]]);
+const dailyAll = () => merged('m_daily', [['ch', 'Kunlar', 'ph-calendar-dots', daily], ['m', 'Kunlik metrikalar', 'ph-chart-bar', metricsPage]]);
 const teamAll = () => merged('m_team', [['m', 'Menejerlar', 'ph-users', managers], ['c', "Qo'ng'iroqlar", 'ph-phone', calls]]);
 const VIEWS = { purchases: salesAll, report: reportPage, integr: integrPage, mapping: mappingPage, geo: geoPage, economy: economyPage, tasks: tasksPage, overview, funnel, daily: dailyAll, leads, creatives, pains, managers: teamAll, speed: speedPage, branches: branchesPage, status: statusPage, guide: guidePage, briefs, ai, settings, users: usersPage };
 function render() { $('app').innerHTML = shell(S.data.funnel ? VIEWS[S.page]() : card(empty('Yuklanmoqda…'))); }
