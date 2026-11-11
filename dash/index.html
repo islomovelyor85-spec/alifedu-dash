@@ -397,9 +397,9 @@ function overviewKpi(t) {
       ${kpi('Sifatsiz', num(t.junk), pct(div(t.junk, t.leads)) + ' leaddan', 'crimson')}
     </div>` + planStrip(t, sold, spend) + convBlock(t, sold) + adKpis;
 }
-// Step-by-step conversions; the sale steps use the same sale count as the Sotuv card.
-function convBlock(t, sold) {
-  const R = planRange(), p = R.p;
+// Step-by-step conversions inside this period's leads (t.won = sales from them), so no step can pass 100%.
+function convBlock(t, allSold) {
+  const R = planRange(), p = R.p, sold = t.won;
   const steps = [
     ['Lead → aloqa', t.contacted, t.leads, null, "Qo'ng'iroq qilib gaplashilgan leadlar"],
     ['Lead → sifatli', t.qual, t.leads, p && +p.lead_qual, 'Bitrix statusi «sifatli»'],
@@ -410,7 +410,7 @@ function convBlock(t, sold) {
   ];
   const tile = ([l, a, b, plan, hint]) => { const v = div(a, b), r = plan ? div(v, plan) : null;
     return `<div class="bg-surface rounded-3xl p-4"><div class="text-[11.5px] text-muted font-semibold">${l}</div><div class="text-[26px] font-bold tabular-nums mt-1" ${r != null ? `style="color:rgb(var(--c-${r >= 0.9 ? 'green' : r >= 0.7 ? 'amber' : 'rose'}))"` : ''}>${pct(v)}</div><div class="text-[11px] text-muted tabular-nums">${num(a)} / ${num(b)}${plan ? ` · reja ${pct(plan)}` : ''}</div><div class="text-[10.5px] text-muted mt-1 leading-snug">${hint}</div></div>`; };
-  return `<div class="flex items-baseline justify-between gap-3 mb-2"><h3 class="font-semibold">Konversiyalar</h3><span class="text-[11px] text-muted">${saleMode() ? "Sotuvga oid foizlar — davrdagi sotuvlar ÷ davrdagi leadlar" : "Hammasi — shu davr leadlari ichida"}</span></div><div class="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-6">${steps.map(tile).join('')}</div>`;
+  return `<div class="flex items-baseline justify-between gap-3 mb-2"><h3 class="font-semibold">Konversiyalar</h3><span class="text-[11px] text-muted">Shu davrda kelgan leadlar ichida${saleMode() && allSold !== sold ? `: davrdagi ${num(allSold)} ta sotuvdan ${num(sold)} tasi shu leadlardan, qolgani oldingi oylar leadlaridan` : ''}</span></div><div class="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-6">${steps.map(tile).join('')}</div>`;
 }
 
 // ---------- Plan: months of the selected range, each counted for the days it covers ----------
@@ -753,7 +753,7 @@ function daily() {
   const soldCh = countBy(salesList(true), p => channelOf(p.source));
   for (const o of bySrc) o.won = soldCh[o.key]?.n || 0;
   for (const k in soldCh) if (!bySrc.some(o => o.key === k)) bySrc.push({ key: k, ...Object.fromEntries(OUT.map(([x]) => [x, 0])), revenue: 0, won: soldCh[k].n });
-  tot.won = salesList(true).length;
+  tot.won = salesList(true).length; tot._foot = true;
   const view = S.dailyView || 'src', picked = S.source;
   const rate = (o, k) => div(o[k], o.leads);
   // Findings only from sources with enough leads to mean something.
@@ -779,7 +779,7 @@ function daily() {
   const body = view === 'src'
     ? table(cols('Kanal', r => `<button data-c="${esc(r.key)}" onclick="S.source=this.dataset.c;S.dailyView='day';render()" class="font-semibold hover:text-accent text-left">${esc(r.key)}</button>`), bySrc, tot)
     : (() => { const ds = groupSum(bySource(rows), r => r.day).sort((a, b) => b.key.localeCompare(a.key)); const [t2] = groupSum(bySource(rows), () => 'all');
-      const soldDay = countBy(salesList(), p => p.mday); for (const o of ds) o.won = soldDay[o.key]?.n || 0; if (t2) t2.won = salesList().length;
+      const soldDay = countBy(salesList(), p => p.mday); for (const o of ds) o.won = soldDay[o.key]?.n || 0; if (t2) { t2.won = salesList().length; t2._foot = true; }
       return table(cols('Sana', r => `<span class="font-semibold tabular-nums">${r.key.slice(8)}.${r.key.slice(5, 7)}</span> <span class="text-xs text-muted">${WD[new Date(r.key + 'T00:00').getDay()]}</span>`), ds, t2); })();
   return card(`<div class="flex flex-wrap items-center gap-3 mb-4">${seg}${view === 'day' ? srcSelect : ''}</div>` +
     h3(view === 'src' ? 'Kanallar: qaysi kanal sifatli lead va sotuv beradi' : `Kunlar${picked ? ' — ' + esc(picked) : ''}: qaysi kun leadlari yaxshi ishlandi`,
