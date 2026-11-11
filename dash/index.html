@@ -385,7 +385,7 @@ function spark(vals, color, w = 120, h = 36) {
   if (ok.length < 2) return '';
   const mx = Math.max(...ok), mn = Math.min(...ok), sx = w / (v.length - 1), y = x => h - 3 - (mx === mn ? .5 : (x - mn) / (mx - mn)) * (h - 6);
   const pts = v.map((x, i) => x == null ? null : `${(i * sx).toFixed(1)},${y(x).toFixed(1)}`).filter(Boolean).join(' '), id = 'sp' + Math.random().toString(36).slice(2, 8);
-  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" class="shrink-0" preserveAspectRatio="none"><defs><linearGradient id="${id}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="rgb(var(--c-${color}))" stop-opacity=".32"/><stop offset="1" stop-color="rgb(var(--c-${color}))" stop-opacity="0"/></linearGradient></defs><polygon points="0,${h} ${pts} ${w},${h}" fill="url(#${id})"/><polyline points="${pts}" fill="none" stroke="rgb(var(--c-${color}))" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+  return `<svg viewBox="0 0 ${w} ${h}" class="w-full h-9" preserveAspectRatio="none"><defs><linearGradient id="${id}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="rgb(var(--c-${color}))" stop-opacity=".32"/><stop offset="1" stop-color="rgb(var(--c-${color}))" stop-opacity="0"/></linearGradient></defs><polygon points="0,${h} ${pts} ${w},${h}" fill="url(#${id})"/><polyline points="${pts}" fill="none" stroke="rgb(var(--c-${color}))" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
 }
 // Rolling 7-day ratio per day, so a cost line is not jumping on days with one lead.
 const rolling = (days, numBy, denBy, k = 7) => days.map((d, i) => { let a = 0, b = 0; for (let j = Math.max(0, i - k + 1); j <= i; j++) { a += numBy[days[j]] || 0; b += denBy[days[j]] || 0; } return b ? a / b : null; });
@@ -410,7 +410,7 @@ function overviewKpi(t) {
   const spendD = by(d.spend, r => +r.spend), tLeadD = by(d.daily.filter(r => r.source === 'Target'), r => +r.leads), tQualD = by(d.daily.filter(r => r.source === 'Target'), r => +r.qual);
   const tSaleD = tSales.reduce((m, p) => (m[p.mday] = (m[p.mday] || 0) + 1, m), {}), saleD = sales.reduce((m, p) => (m[p.mday] = (m[p.mday] || 0) + 1, m), {}), revD = sales.reduce((m, p) => (m[p.mday] = (m[p.mday] || 0) + (+p.amount || 0), m), {});
   const usd = v => adMoney(v, false);
-  const mcard = (l, v, sub, line, color, extra = '') => `<div class="glow rounded-3xl p-5 border border-line/60"><div class="flex items-start justify-between gap-3"><div class="min-w-0"><div class="text-[12px] text-muted font-medium">${l}</div><div class="num-xl text-[30px] font-bold leading-tight mt-1 tabular-nums">${v}</div></div>${line}</div><div class="mt-2 leading-snug">${sub}</div>${extra}</div>`;
+  const mcard = (l, v, sub, line, color, extra = '') => `<div class="glow rounded-3xl p-5 border border-line/60"><div class="flex items-start justify-between gap-3"><div class="min-w-0"><div class="text-[12px] text-muted font-medium">${l}</div><div class="num-xl text-[26px] 2xl:text-[30px] font-bold leading-tight mt-1 tabular-nums whitespace-nowrap">${v}</div></div><div class="opacity-90 w-[84px] 2xl:w-[110px]">${line}</div></div><div class="mt-2 leading-snug">${sub}</div>${extra}</div>`;
   const cpl = div(spend, T.leads), cpql = div(spend, T.qual), cac = div(spend, tSales.length);
   const romi = fx && spend ? div(tRev - spend * fx, spend * fx) : null, romiLtv = fx && spend && months > 1 ? div(tRev * months - spend * fx, spend * fx) : null;
   const money = `<div class="grid sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-3">
