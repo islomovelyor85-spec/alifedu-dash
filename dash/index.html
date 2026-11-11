@@ -377,16 +377,17 @@ function overviewKpi(t) {
   const sales = salesList(), sold = sales.length, rev = sales.reduce((a, p) => a + (+p.amount || 0), 0);
   // A sale = deal now in To'lov qildi, Nabor guruh or Сделка успешна; show where they stand today.
   const wonStage = countBy(sales, p => p.stage), stageOrder = ["To'lov qildi", 'Nabor guruh', 'Сделка успешна'];
-  const wonStages = Object.entries(wonStage).sort((a, b) => (stageOrder.indexOf(a[0]) + 1 || 9) - (stageOrder.indexOf(b[0]) + 1 || 9)).map(([k, o]) => `${esc(k)}: <b>${num(o.n)}</b>`).join(' · ');
+  const wonStages = Object.entries(wonStage).sort((a, b) => (stageOrder.indexOf(a[0]) + 1 || 9) - (stageOrder.indexOf(b[0]) + 1 || 9)).map(([k, o]) => `${esc({ 'Сделка успешна': 'Muvaffaqiyatli' }[k] || k)}: <b>${num(o.n)}</b>`).join(' · ');
   const tSales = salesList(true).filter(p => channelOf(p.source) === 'Target'), tRev = tSales.reduce((a, p) => a + (+p.amount || 0), 0);
-  const romi = fx && spend ? div(tRev - spend * fx, spend * fx) : null;
+  const romi = fx && spend ? div(tRev - spend * fx, spend * fx) : null, months = +S.data.cfg?.avg_months || 0;
+  const romiLtv = fx && spend && months > 1 ? div(tRev * months - spend * fx, spend * fx) : null;
   const days = Math.round((new Date(S.to) - new Date(S.from)) / 864e5) + 1;
   const adKpis = spend ? `<div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
       ${kpi('Reklama xarajati', adMoney(spend), `Meta · ${num(metaLeads)} natija (Results)`, 'amber')}
       ${kpi('Lead narxi', adMoney(div(spend, paid.leads)), `Target: ${num(paid.leads)} lead Bitrix'da`, 'blue')}
       ${kpi('Sifatli lead narxi', adMoney(div(spend, paid.qual)), `${num(paid.qual)} ta sifatli Target lead`, 'teal')}
       ${kpi('Sotuv narxi', adMoney(div(spend, tSales.length)), `${adMoney(spend, false)} ÷ ${num(tSales.length)} ta Target sotuv`, 'green')}
-      ${kpi('ROMI', pct(romi), fx ? `Target tushumi ${moneyShortTop(tRev)} so'm, xarajat ${moneyShortTop(spend * fx)} so'm` : "kurs yo'q", 'violet')}
+      ${kpi('ROMI', pct(romi), fx ? `1-oy tushumi bo'yicha. ${months > 1 ? `${months} oy o'qisa: <b>${pct(romiLtv)}</b>` : ''}` : "kurs yo'q", 'violet')}
     </div>` : `<div class="mb-6 text-xs text-muted">Tanlangan davrda reklama xarajati yo'q.</div>`;
   return `<div class="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-6">
       ${kpi('Jami leadlar', num(t.leads), `${fmtDay(S.from)}${S.from !== S.to ? ' — ' + fmtDay(S.to) : ''} · kuniga ~${num(t.leads / days)}`, 'violet', true)}
