@@ -456,13 +456,29 @@ function overviewKpi() {
 const moreLink = pg => `<button onclick="event.stopPropagation();goPage('${pg}')" class="text-[11.5px] font-semibold text-accent whitespace-nowrap">Batafsil →</button>`;
 // Click on a reason: the leads (lead status) or deals (lost reason) behind the number, for the selected dates.
 // Fetched on demand in one or two small queries, so opening the page costs nothing extra.
+const FUNNEL_STEPS = [['Lid', null], ['Aloqa qilindi', 'contacted'], ['Sifatli', 'is_qual'], ['Filialga keldi', 'came_to_branch'], ['Sotuvga aylandi', 'won']];
 async function openDrill(kind, key) {
-  const req = S.drill = { kind, key, rows: null };
+  const step = kind === 'step' || kind === 'lost_step';
+  const title = !step ? key : kind === 'step' ? FUNNEL_STEPS[key][0] : `${FUNNEL_STEPS[key - 1][0]} → ${FUNNEL_STEPS[key][0]}: yo'qolganlar`;
+  const req = S.drill = { kind, key, title, rows: null };
   render();
   const srcName = Object.fromEntries((S.data.crmStatuses || []).filter(r => r.entity === 'SOURCE').map(r => [r.status_id, r.name]));
   let rows = [];
   try {
-    if (kind === 'status') {
+    if (step) {
+      const [, flag] = FUNNEL_STEPS[key], prev = kind === 'lost_step' ? FUNNEL_STEPS[key - 1][1] : null;
+      let f = await q('v_lead_facts', x => {
+        x = x.gte('day', S.from).lte('day', S.to);
+        if (kind === 'step') return flag ? x.eq(flag, true) : x;
+        return (prev ? x.eq(prev, true) : x).eq(flag, false);
+      }, 'bitrix_id,day,source_id,manager_id,created_at,status_name');
+      f = f.filter(r => !S.source || channelOf(srcName[r.source_id] || r.source_id || "Noma'lum") === S.source);
+      if (S.brF) { const inBr = new Set((await q('lead_branch', x => x.eq('branch', S.brF), 'bitrix_id')).map(r => r.bitrix_id)); f = f.filter(r => inBr.has(r.bitrix_id)); }
+      f.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+      const info = {}, top = f.slice(0, 300);
+      for (let i = 0; i < top.length; i += 200) for (const l of await q('leads', x => x.in('bitrix_id', top.slice(i, i + 200).map(r => r.bitrix_id)), 'bitrix_id,name,phone')) info[l.bitrix_id] = l;
+      rows = f.map(r => ({ id: r.bitrix_id, url: BX_LEAD(r.bitrix_id), name: info[r.bitrix_id]?.name, phone: info[r.bitrix_id]?.phone, at: r.created_at || r.day, who: S.data.users[r.manager_id] || r.manager_id, src: [srcName[r.source_id] || r.source_id, r.status_name].filter(Boolean).join(' · ') }));
+    } else if (kind === 'status') {
       const f = (await q('v_lead_facts', x => x.gte('day', S.from).lte('day', S.to).eq('status_name', key).eq('is_qual', false).eq('won', false), 'bitrix_id,day,source_id,manager_id'))
         .filter(r => !S.source || channelOf(srcName[r.source_id] || r.source_id || 'Belgilanmagan') === S.source);
       const info = {};
@@ -481,11 +497,11 @@ async function openDrill(kind, key) {
 }
 function drillPanel() {
   const d = S.drill; if (!d) return '';
-  const lead = d.kind === 'status', LIMIT = 300;
+  const lead = d.kind !== 'lost', LIMIT = 300;
   const body = d.rows == null ? empty('Yuklanmoqda…') : !d.rows.length ? empty("Bu davrda topilmadi") : `<div class="divide-y divide-line">${d.rows.slice(0, LIMIT).map(r => `<a href="${r.url}" target="_blank" rel="noopener" class="flex items-center justify-between gap-3 py-2.5 hover:bg-surface2 rounded-lg px-2 -mx-2"><div class="min-w-0"><div class="text-[13px] font-semibold truncate">${esc(r.name || (lead ? 'Lid' : 'Deal') + ' #' + r.id)}</div><div class="text-[11px] text-muted truncate">${esc(String(r.who || '—'))}${r.src ? ' · ' + esc(String(r.src)) : ''}${r.phone ? ' · +' + esc(r.phone) : ''}</div></div><div class="text-right shrink-0"><div class="text-[11px] text-muted tabular-nums">${fmtDay(String(r.at).slice(0, 10))}</div><div class="text-[11px] text-accent">#${r.id} ↗</div></div></a>`).join('')}</div>${d.rows.length > LIMIT ? `<p class="text-[11px] text-muted mt-2">Birinchi ${LIMIT} tasi ko'rsatildi (jami ${num(d.rows.length)}).</p>` : ''}`;
   return `<div class="fixed inset-0 z-40 bg-black/40" onclick="S.drill=null;render()"></div>
     <div class="fixed inset-y-0 right-0 z-50 w-full sm:w-[460px] bg-surface border-l border-line shadow-card flex flex-col">
-      <div class="p-4 border-b border-line flex items-start justify-between gap-3"><div class="min-w-0"><div class="text-[11px] text-muted">${lead ? "Sifatli bo'lmagan leadlar" : 'Sotuvga aylanmagan deallar'} · ${shortRange(S.from, S.to)}${S.source && lead ? ' · ' + esc(S.source) : ''}</div><div class="font-semibold text-[15px] mt-0.5">${esc(d.key)}</div>${d.rows ? `<div class="text-[12px] text-muted mt-0.5">${num(d.rows.length)} ta · bosing — Bitrix24'da ochiladi</div>` : ''}</div><button onclick="S.drill=null;render()" class="h-9 w-9 shrink-0 rounded-lg bg-surface2" aria-label="Yopish"><i class="ph-bold ph-x"></i></button></div>
+      <div class="p-4 border-b border-line flex items-start justify-between gap-3"><div class="min-w-0"><div class="text-[11px] text-muted">${d.kind === 'status' ? "Sifatli bo'lmagan leadlar" : d.kind === 'lost' ? 'Sotuvga aylanmagan deallar' : 'Voronka · shu davrda kelgan leadlar'} · ${shortRange(S.from, S.to)}${lead ? [S.source, d.kind !== 'status' && S.brF].filter(Boolean).map(x => ' · ' + esc(x)).join('') : ''}</div><div class="font-semibold text-[15px] mt-0.5">${esc(d.title || d.key)}</div>${d.rows ? `<div class="text-[12px] text-muted mt-0.5">${num(d.rows.length)} ta · bosing — Bitrix24'da ochiladi</div>` : ''}</div><button onclick="S.drill=null;render()" class="h-9 w-9 shrink-0 rounded-lg bg-surface2" aria-label="Yopish"><i class="ph-bold ph-x"></i></button></div>
       <div class="flex-1 overflow-y-auto p-4">${body}</div></div>`;
 }
 // Step-by-step funnel: how many pass, how many drop at each step, and why they drop.
@@ -495,15 +511,15 @@ function stepFunnel(F, PF, R) {
   const cols = st.map(([l, v, pv], i) => { const h = Math.max(Math.sqrt(div(v, F.leads) || 0) * 100, 3), conv = i ? div(v, st[i - 1][1]) : null, pconv = i ? div(pv, st[i - 1][2]) : null, plan = planConv[i], lost = i ? st[i - 1][1] - v : 0;
     const judged = i === 2 ? div(v, F.leads) : conv; // the plan sets lead → qualified, not contacted → qualified
     const tone = plan ? (judged >= plan ? 'success' : judged >= plan * 0.7 ? 'warn' : 'danger') : pconv ? (conv >= pconv ? 'success' : 'danger') : 'muted';
-    return `<div onclick="goPage('${['leads', 'speed', 'leads', 'branches', 'purchases'][i]}')" title="Batafsil" class="flex-1 min-w-[110px] cursor-pointer rounded-xl hover:bg-surface2/60 transition"><div class="text-[12px] text-muted font-medium h-9 leading-tight">${l}</div><div class="num-xl text-[24px] font-bold tabular-nums">${num(v)}</div><div class="text-[10.5px] text-muted">${i ? pct(div(v, F.leads)) + ' liddan' : 'shu davrda kelgan'}</div>
+    return `<div onclick="openDrill('step', ${i})" title="Bosing — shu bosqichdagi leadlar" class="flex-1 min-w-[110px] cursor-pointer rounded-xl hover:bg-surface2/60 transition"><div class="text-[12px] text-muted font-medium h-9 leading-tight">${l}</div><div class="num-xl text-[24px] font-bold tabular-nums">${num(v)}</div><div class="text-[10.5px] text-muted">${i ? pct(div(v, F.leads)) + ' liddan' : 'shu davrda kelgan'}</div>
       <div class="relative h-[150px] mt-2 rounded-xl bg-surface2 overflow-hidden"><div class="absolute bottom-0 inset-x-0 rounded-xl" style="height:${h}%;background:linear-gradient(180deg, rgb(var(--c-blue)), rgb(var(--c-violet)))"></div></div>
-      ${i ? `<div class="mt-2 rounded-xl p-2" style="background:rgb(var(--${tone}) / .08)"><div class="text-[13px] font-bold tabular-nums" style="color:rgb(var(--${tone}))">${pct(conv)} o'tdi</div><div class="text-[10.5px] text-muted leading-tight">${plan ? (i === 2 ? `liddan ${pct(judged)}, plan ${pct(plan)}` : `plan ${pct(plan)}`) : ''}${plan && pconv != null ? ' · ' : ''}${pconv != null ? `oldin ${pct(pconv)}` : ''}</div><div class="text-[11.5px] font-semibold mt-1" style="color:rgb(var(--danger))"><i class="ph-bold ph-arrow-down-right"></i> ${num(lost)} yo'qoldi</div></div>` : '<div class="mt-2 p-2 text-[10.5px] text-muted">boshlanish</div>'}</div>`; }).join('');
+      ${i ? `<div class="mt-2 rounded-xl p-2" style="background:rgb(var(--${tone}) / .08)"><div class="text-[13px] font-bold tabular-nums" style="color:rgb(var(--${tone}))">${pct(conv)} o'tdi</div><div class="text-[10.5px] text-muted leading-tight">${plan ? (i === 2 ? `liddan ${pct(judged)}, plan ${pct(plan)}` : `plan ${pct(plan)}`) : ''}${plan && pconv != null ? ' · ' : ''}${pconv != null ? `oldin ${pct(pconv)}` : ''}</div><div onclick="event.stopPropagation();openDrill('lost_step', ${i})" title="Bosing — yo'qolgan leadlar" class="text-[11.5px] font-semibold mt-1 underline decoration-dotted underline-offset-2" style="color:rgb(var(--danger))"><i class="ph-bold ph-arrow-down-right"></i> ${num(lost)} yo'qoldi</div></div>` : '<div class="mt-2 p-2 text-[10.5px] text-muted">boshlanish</div>'}</div>`; }).join('');
   // Why leads drop: lead statuses that are not qualified (by channel), and lost-deal reasons.
   const so = (S.data.statusOut || []).filter(r => !S.source || channelOf(r.source) === S.source), stBy = {}; for (const r of so) if (!+r.qual && !+r.won) stBy[r.status_name] = (stBy[r.status_name] || 0) + +r.leads;
   const lr = {}; for (const r of S.data.lostReasons || []) lr[r.reason || "Sabab yozilmagan"] = (lr[r.reason || "Sabab yozilmagan"] || 0) + +r.deals;
   const reasonList = (o, color, kind) => { const e = Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, 6), tot = Object.values(o).reduce((a, b) => a + b, 0) || 1, mx = e[0]?.[1] || 1;
     return e.map(([k, n]) => `<div data-k="${esc(k)}" onclick="openDrill('${kind}', this.dataset.k)" title="Bosing — ro'yxat ochiladi" class="py-1.5 px-1.5 -mx-1.5 rounded-lg cursor-pointer hover:bg-surface2"><div class="flex justify-between gap-2 text-[12.5px]"><span class="truncate">${esc(k)}</span><span class="tabular-nums whitespace-nowrap"><b>${num(n)}</b> <span class="text-muted text-[11px]">${pct(n / tot, 0)}</span></span></div><div class="h-1.5 rounded-full bg-surface2 mt-1"><div class="h-1.5 rounded-full" style="width:${(n / mx * 100).toFixed(0)}%;background:rgb(var(--c-${color}))"></div></div></div>`).join('') || empty("Ma'lumot yo'q"); };
-  return `<div class="${BOX} mb-3"><div class="flex flex-wrap items-center justify-between gap-2 mb-3"><div><h3 class="font-semibold text-[15px]">Voronka: qayerda yo'qotyapmiz</h3><p class="text-[11.5px] text-muted">Shu davrda kelgan leadlar yo'li. Rang: yashil — plandan yaxshi, qizil — yomon. «Oldin» — oldingi ${prevRange().days} kun.</p></div>${S.source || S.brF ? `<span class="text-[11.5px] px-2.5 py-1 rounded-full bg-surface2">${esc([S.source, S.brF].filter(Boolean).join(' · '))}</span>` : ''}</div>
+  return `<div class="${BOX} mb-3"><div class="flex flex-wrap items-center justify-between gap-2 mb-3"><div><h3 class="font-semibold text-[15px]">Voronka: qayerda yo'qotyapmiz</h3><p class="text-[11.5px] text-muted">Shu davrda kelgan leadlar yo'li. Ustunni bossangiz — o'sha leadlar, «yo'qoldi»ni bossangiz — yo'qolganlari ochiladi. Rang: yashil — plandan yaxshi, qizil — yomon. «Oldin» — oldingi ${prevRange().days} kun.</p></div>${S.source || S.brF ? `<span class="text-[11.5px] px-2.5 py-1 rounded-full bg-surface2">${esc([S.source, S.brF].filter(Boolean).join(' · '))}</span>` : ''}</div>
     <div class="flex gap-3 overflow-x-auto pb-1">${cols}</div>
     <div class="grid md:grid-cols-2 gap-4 mt-5 pt-4 border-t border-line/60"><div><div class="text-[13px] font-semibold mb-1">Nega lid sifatli bo'lmadi</div><div class="text-[11px] text-muted mb-1">Lead statusi bo'yicha${S.brF ? ' (barcha filiallar)' : ''} · bosing — leadlar ochiladi</div>${reasonList(stBy, 'rose', 'status')}</div>
       <div><div class="text-[13px] font-semibold mb-1">Nega deal sotuvga aylanmadi</div><div class="text-[11px] text-muted mb-1">Yopilgan deal sababi (barcha kanallar) · bosing — deallar ochiladi</div>${reasonList(lr, 'amber', 'lost')}</div></div></div>`;
