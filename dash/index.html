@@ -448,8 +448,9 @@ function overviewKpi() {
     ${kpi('Sifatli lid narxi', cq, 0, usd, pcq == null ? '<span class="text-muted">Target</span>' : delta(cq, pcq, true, usd), spark(rolling(days, spendD, tQualD), 'blue'), 'blue')}
     ${kpi('Mijoz narxi (CAC)', cac, 0, usd, (pcac == null ? '' : delta(cac, pcac, true, usd)) + ` <span class="text-muted">· ROMI ${pct(romi)}</span>`, spark(rolling(days, spendD, tSaleD, 14), 'violet'), 'violet')}
   </div>`;
-  return ovFilters() + insights({ t: { ...F, came_to_branch: F.came }, T, pT: PT, sold, spend, pSpend: pSpend ?? 0, R, tSales, pTSales }) + kpis
-    + stepFunnel(F, PF, R) + compareCard(F, PF) + channelsCard(R) + `<div class="grid md:grid-cols-3 gap-3 mb-6">${branchRank()}${creativeRank()}${managerBoard(sales).replace(/xl:col-span-3 md:col-span-3/, '')}</div>` + forecastCard();
+  // Conclusions come right after the funnel: first where leads are lost, then what it means and what to do.
+  return ovFilters() + kpis
+    + stepFunnel(F, PF, R) + insights({ t: { ...F, came_to_branch: F.came }, T, pT: PT, sold, spend, pSpend: pSpend ?? 0, R, tSales, pTSales }) + compareCard(F, PF) + channelsCard(R) + `<div class="grid md:grid-cols-3 gap-3 mb-6">${branchRank()}${creativeRank()}${managerBoard(sales).replace(/xl:col-span-3 md:col-span-3/, '')}</div>` + forecastCard();
 }
 // Step-by-step funnel: how many pass, how many drop at each step, and why they drop.
 function stepFunnel(F, PF, R) {
