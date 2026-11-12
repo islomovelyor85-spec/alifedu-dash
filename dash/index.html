@@ -261,16 +261,17 @@ async function load() {
     q('plan_months'), q('v_ad_geo', day), q('v_month_economy', x => x.order('month', { ascending: false })),
     q('tasks', x => x.order('created_at', { ascending: false }).limit(1000)), q('staff'), q('capi_events'), q('crm_map'), q('crm_statuses', x => x.in('entity', ['SOURCE', 'STATUS', 'DEAL_STAGE'])),
   ]);
-  S.data = { funnel, courses, cohort, creatives, naming, pains, taxonomy, objections, managers, briefs, cfg, sync, outcomes, sales, users, dealStages, hours, codes, daily, operators, statusOut, cycle, money, lostReasons, cohortSum, cohortSrc, spend, adDaily, adLeads, adCatalog, wonDaily, salesMonth, calls, speed, dm, dmLive, queue, brDaily, brSpend, brCamp, plans, adGeo, economy, tasks, staff, capi, crmMap, crmStatuses };
+  const D = { funnel, courses, cohort, creatives, naming, pains, taxonomy, objections, managers, briefs, cfg, sync, outcomes, sales, users, dealStages, hours, codes, daily, operators, statusOut, cycle, money, lostReasons, cohortSum, cohortSrc, spend, adDaily, adLeads, adCatalog, wonDaily, salesMonth, calls, speed, dm, dmLive, queue, brDaily, brSpend, brCamp, plans, adGeo, economy, tasks, staff, capi, crmMap, crmStatuses };
   const srcName = Object.fromEntries(crmStatuses.filter(r => r.entity === 'SOURCE').map(r => [r.status_id, r.name]));
   const pr = prevRange(), pday = x => x.gte('day', pr.from).lte('day', pr.to);
   const [prevDaily, prevSpend, forecast, prevBr] = await Promise.all([q('v_daily_outcomes', pday), q('v_spend_daily', pday), q('v_deal_forecast'), q('v_branch_daily', pday)]);
-  Object.assign(S.data, { prevDaily, prevSpend, forecast, prevBr });
-  S.data.purchases = await purchasesP;
-  S.data.me = ADMIN ? { email: (await sbc.auth.getUser()).data.user?.email } : null;
-  if (ADMIN && S.super) S.data.companiesAll = (await sbc.rpc('companies_overview')).data || [];
-  S.data.chanMap = Object.fromEntries(crmMap.filter(r => r.kind === 'source').map(r => [srcName[r.code] || r.code, r.value]));
-  S.data.hiddenUsers = new Set(crmMap.filter(r => r.kind === 'user' && r.value === 'hide').map(r => normName(users[r.code])));
+  Object.assign(D, { prevDaily, prevSpend, forecast, prevBr });
+  D.purchases = await purchasesP;
+  D.me = ADMIN ? { email: (await sbc.auth.getUser()).data.user?.email } : null;
+  if (ADMIN && S.super) D.companiesAll = (await sbc.rpc('companies_overview')).data || [];
+  D.chanMap = Object.fromEntries(crmMap.filter(r => r.kind === 'source').map(r => [srcName[r.code] || r.code, r.value]));
+  D.hiddenUsers = new Set(crmMap.filter(r => r.kind === 'user' && r.value === 'hide').map(r => normName(users[r.code])));
+  return D;
 }
 
 const opts = (vals, cur) => ['', ...vals].map(v => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${v ? esc(v) : 'Hammasi'}</option>`).join('');
@@ -2237,7 +2238,7 @@ async function removeCompanyAdmin(user_id) {
 }
 
 const VIEWS = { companies: companiesPage, purchases: salesAll, report: reportPage, integr: integrPage, mapping: mappingPage, geo: geoPage, economy: economyPage, tasks: tasksPage, overview, funnel, daily: dailyAll, leads, creatives, pains, managers: teamAll, speed: speedPage, branches: branchesPage, status: statusPage, guide: guidePage, briefs, ai, settings, users: usersPage };
-function render() { $('app').innerHTML = shell(S.data.funnel ? VIEWS[S.page]() : card(empty('Yuklanmoqda…'))); }
+function render() { $('app').innerHTML = shell(S.data.funnel && !S.loading ? VIEWS[S.page]() : card(empty(S.data.funnel ? `${fmtDay(S.from)} — ${fmtDay(S.to)} uchun ma'lumot yuklanmoqda…` : 'Yuklanmoqda…'))); }
 // Starts the Meta / Bitrix / call syncs now (sync-now waits up to ~55 s), then reloads the data.
 async function syncNow() {
   S.syncing = true; render();
@@ -2251,7 +2252,17 @@ async function syncNow() {
 }
 async function refresh() {
   $('app').innerHTML = shell(card(empty('Yuklanmoqda…')));
-  try { await load(); render(); loadCalls(); } catch (e) { $('app').innerHTML = shell(card(`<p class="text-sm text-danger">${esc(e.message)}</p>`)); }
+  // Only the newest load may land: picking dates again (or switching company) while a load runs discards the older one.
+  const id = S.loadReq = (S.loadReq || 0) + 1;
+  S.loading = true;
+  try {
+    const D = await load();
+    if (id !== S.loadReq) return;
+    S.data = D; S.loading = false; render(); loadCalls();
+  } catch (e) {
+    if (id !== S.loadReq) return;
+    S.loading = false; $('app').innerHTML = shell(card(`<p class="text-sm text-danger">${esc(e.message)}</p>`));
+  }
 }
 
 function loginScreen(err = '') {
