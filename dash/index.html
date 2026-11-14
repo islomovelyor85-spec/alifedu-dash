@@ -283,7 +283,7 @@ const match = r => (!S.course || r.course === S.course) && (!S.branch || r.branc
 const MOVED = { plan: ['overview', 'set', 'overview'], metrics: ['daily', 'm', 'm_daily'], cohort: ['purchases', 'when', 'm_sales'], money: ['purchases', 'money', 'm_sales'], calls: ['managers', 'c', 'm_team'] };
 function goPage(k) {
   if (MOVED[k]) { const [page, tab, sec] = MOVED[k]; (S.sec ||= {})[sec] = tab; k = page; }
-  Object.assign(S, { page: k, menu: false, op: null, call: null, drill: null });
+  Object.assign(S, { page: k, menu: false, op: null, call: null, drill: null, adView: null });
   render(); scrollTo(0, 0);
 }
 // One screen made of several former ones: a row of big tabs above the content.
@@ -2066,7 +2066,7 @@ function adColumns(level, T, thumbs = true) {
   const cost = (k, t, off) => ({ k, t, r: 1, off, s: o => M(k)(o) ?? 1e12, f: o => usd(M(k)(o)) });
   const cnt = (k, t, off) => ({ k, t, r: 1, off, s: o => o[k], f: o => num(o[k]) });
   return [
-    { k: 'name', fixed: 1, t: level === 'ad' ? "E'lon" : level === 'adset' ? 'Adset' : 'Kampaniya', s: o => o.name, f: o => o._foot ? '<b>Jami</b>' : `<div class="flex items-center gap-3">${level === 'ad' && thumbs ? (o.thumb ? `<img src="${esc(o.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="w-10 h-10 rounded-lg object-cover bg-surface2 shrink-0" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'w-10 h-10 rounded-lg bg-surface2 shrink-0'}))">` : '<div class="w-10 h-10 rounded-lg bg-surface2 shrink-0 grid place-items-center text-muted"><i class="ph ph-image"></i></div>') : ''}<div class="max-w-[260px] min-w-0"><div class="font-semibold truncate" title="${esc(o.name)}">${esc(o.name)}</div><div class="text-[11px] text-muted truncate">${o.active ? '<span style="color:rgb(var(--c-green))">● Faol</span>' : "<span>○ To'xtagan</span>"}${level === 'ad' ? ' · ' + esc(o.adset || '') : level === 'adset' ? ' · ' + esc(o.campaign || '') : ''}</div></div></div>` },
+    { k: 'name', fixed: 1, t: level === 'ad' ? "E'lon" : level === 'adset' ? 'Adset' : 'Kampaniya', s: o => o.name, f: o => o._foot ? '<b>Jami</b>' : `<div ${level === 'ad' ? `onclick="openAd('${esc(o.key)}')" title="Bosing — video va kunlik raqamlar"` : ''} class="flex items-center gap-3 ${level === 'ad' ? 'cursor-pointer hover:text-accent' : ''}">${level === 'ad' && thumbs ? (o.thumb ? `<img src="${esc(o.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="w-10 h-10 rounded-lg object-cover bg-surface2 shrink-0" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'w-10 h-10 rounded-lg bg-surface2 shrink-0'}))">` : '<div class="w-10 h-10 rounded-lg bg-surface2 shrink-0 grid place-items-center text-muted"><i class="ph ph-image"></i></div>') : ''}<div class="max-w-[260px] min-w-0"><div class="font-semibold truncate" title="${esc(o.name)}">${esc(o.name)}</div><div class="text-[11px] text-muted truncate">${o.active ? '<span style="color:rgb(var(--c-green))">● Faol</span>' : "<span>○ To'xtagan</span>"}${level === 'ad' ? ' · ' + esc(o.adset || '') : level === 'adset' ? ' · ' + esc(o.campaign || '') : ''}</div></div></div>` },
     { k: 'spend', t: 'Xarajat', r: 1, s: o => o.spend, f: o => usd(o.spend) },
     cnt('impr', "Ko'rishlar"), cnt('lclicks', 'Link klik', 1),
     { k: 'ctr', t: 'CTR', r: 1, s: o => M('ctr')(o) ?? -1, f: o => pct(M('ctr')(o)) },
@@ -2096,13 +2096,89 @@ function creatives() {
   const Tf = rows.reduce((t, o) => { for (const k of AD_SUMS) t[k] += o[k]; return t; }, { _foot: true, name: 'Jami', ...Object.fromEntries(AD_SUMS.map(x => [x, 0])) });
   const chooser = `<details class="relative"><summary class="list-none cursor-pointer h-9 px-3 rounded-xl bg-surface2 text-sm font-semibold inline-flex items-center gap-1.5"><i class="ph-bold ph-columns"></i>Ustunlar ${cols.length - 1}/${colsAll.length - 1}</summary><div class="absolute z-20 mt-2 right-0 w-64 max-h-96 overflow-y-auto bg-surface border border-line rounded-2xl shadow-card p-3 space-y-1">${colsAll.filter(c => !c.fixed).map(c => `<label class="flex items-center gap-2 text-sm py-0.5"><input type="checkbox" ${adColOn(c) ? 'checked' : ''} onchange="toggleAdCol('${c.k}',this.checked)" class="w-4 h-4">${c.t}</label>`).join('')}</div></details>`;
   const more = rows.length > A.limit ? `<div class="mt-4 flex items-center gap-3"><button onclick="S.ad.limit+=20;render()" class="h-9 px-4 rounded-xl bg-surface2 text-sm font-semibold">Yana 20 ta</button><span class="text-xs text-muted">${A.limit} / ${rows.length} ko'rsatildi</span></div>` : '';
-  return `<div class="flex flex-wrap items-center gap-3 mb-4">${attrToggle()}</div>` + card(`<div class="flex flex-wrap items-center gap-3 mb-4">
+  return `<div class="flex flex-wrap items-center gap-3 mb-4">${attrToggle()}</div>` + campaignDaily() + '<div class="h-6"></div>' + card(`<div class="flex flex-wrap items-center gap-3 mb-4">
       ${segBtn([['all', `Hammasi ${counts.all}`], ['active', `Faol ${counts.active}`], ['paused', `To'xtagan ${counts.paused}`]], A.status, "S.ad.status='$';S.ad.limit=20;render()")}
       ${segBtn([['ad', "E'lonlar"], ['adset', 'Adsetlar'], ['campaign', 'Kampaniyalar']], A.level, "S.ad.level='$';S.ad.limit=20;render()")}
       ${chooser}
       <input value="${esc(A.q)}" placeholder="Qidirish…" onchange="S.ad.q=this.value;S.ad.limit=20;render()" class="h-9 px-3 rounded-xl bg-surface2 border border-line text-sm w-full sm:w-56 ml-auto">
     </div>` + h3('Kreativlar samaradorligi', `CTR va CPC — link klik bo'yicha. Tushum va foyda so'mdagi deal summasidan, xarajat kurs bo'yicha so'mga o'tkaziladi. ${ATTR_NOTE}`) +
     table(cols, rows, Tf, A.limit) + more);
+}
+
+// ---------- Campaigns day by day: which one brings good leads and sales, every day ----------
+// Spend: Meta day. Leads and qualified: the day the lead came. Sales: the top date switch (sale day / lead day) and attribution.
+function adDays(ids, keyOf) {
+  const by = {}, cell = (k, d) => ((by[k] ??= {})[d] ??= { spend: 0, leads: 0, qual: 0, won: 0, revenue: 0 });
+  for (const r of S.data.adDaily) { const k = keyOf(r.ad_id); if (k != null && (!ids || ids.has(r.ad_id))) cell(k, r.date).spend += +r.spend; }
+  for (const r of S.data.adLeads) { const k = keyOf(r.ad_id); if (k != null && (!ids || ids.has(r.ad_id))) { const c = cell(k, r.day); c.leads += +r.leads; c.qual += +r.qual; } }
+  for (const p of salesInRange()) { const k = p.a_ad && keyOf(p.a_ad); if (k != null && (!ids || ids.has(p.a_ad))) { const c = cell(k, p.a_day); c.won++; c.revenue += +p.amount || 0; } }
+  return by;
+}
+const CD_METRICS = [['qual', 'Sifatli lid'], ['won', 'Sotuv'], ['cpql', 'Sifatli lid narxi'], ['leads', 'Lid'], ['spend', 'Xarajat']];
+function campaignDaily() {
+  const cat = adCat(), m = S.cdM || 'qual', days = rangeDays(), usd = n => adMoney(n, false);
+  const by = adDays(null, id => cat[id]?.campaign || null);
+  const sum = o => Object.values(o).reduce((t, c) => { for (const k in c) t[k] = (t[k] || 0) + c[k]; return t; }, { spend: 0, leads: 0, qual: 0, won: 0, revenue: 0 });
+  let rows = Object.entries(by).map(([name, d]) => ({ name, d, t: sum(d) })).filter(r => r.t.spend > 0 || r.t.leads > 0 || r.t.won > 0);
+  if (!rows.length) return card(h3('Kampaniyalar: kunlik nazorat') + empty("Tanlangan davrda reklama ma'lumoti yo'q"));
+  rows.sort((a, b) => b.t.qual - a.t.qual || b.t.won - a.t.won || b.t.spend - a.t.spend);
+  const all = sum(Object.fromEntries(rows.map(r => [r.name, r.t]))), avgCpql = div(all.spend, all.qual);
+  const val = c => !c ? null : m === 'cpql' ? (c.spend > 0 ? (c.qual ? c.spend / c.qual : Infinity) : null) : c[m] || 0;
+  const mx = Math.max(1, ...rows.flatMap(r => days.map(d => (m === 'cpql' ? 0 : val(r.d[d]) || 0))));
+  const show = v => m === 'cpql' ? (v === Infinity ? '∞' : usd(v)) : m === 'spend' ? usd(v) : num(v);
+  const paint = v => {
+    if (v == null || (m !== 'cpql' && !v)) return '';
+    if (m === 'cpql') { if (!avgCpql) return ''; const r = v / avgCpql; return r <= 0.8 ? 'background:rgb(var(--success) / .22)' : r <= 1.2 ? 'background:rgb(var(--warn) / .18)' : 'background:rgb(var(--danger) / .2)'; }
+    if (m === 'spend') return `background:rgb(var(--c-blue) / ${(0.08 + 0.5 * v / mx).toFixed(2)})`;
+    return `background:rgb(var(--success) / ${(0.1 + 0.55 * v / mx).toFixed(2)})`;
+  };
+  const LIMIT = S.cdAll ? rows.length : 15, today = iso(new Date());
+  const head = `<tr><th class="sticky left-0 z-10 bg-surface text-left font-semibold text-muted text-[11px] px-2 py-2 min-w-[200px]">Kampaniya</th>${days.map(d => `<th class="text-[10.5px] font-semibold px-1 py-2 text-center whitespace-nowrap ${d === today ? 'text-accent' : 'text-muted'}">${+d.slice(8)}<div class="font-normal">${MON[+d.slice(5, 7) - 1]}</div></th>`).join('')}<th class="text-[11px] font-semibold text-muted px-2 py-2 text-right">Jami</th><th class="text-[11px] font-semibold text-muted px-2 py-2 text-right">CPQL</th></tr>`;
+  const line = r => `<tr class="border-t border-line/60"><td class="sticky left-0 z-10 bg-surface px-2 py-1.5"><div class="text-[12.5px] font-semibold truncate max-w-[240px]" title="${esc(r.name)}">${esc(r.name)}</div><div class="text-[10.5px] text-muted">${usd(r.t.spend)} · ${num(r.t.leads)} lid · ${num(r.t.qual)} sifatli · ${num(r.t.won)} sotuv</div></td>${days.map(d => { const c = r.d[d], v = val(c);
+      return `<td class="px-0.5 py-1"><div class="h-8 min-w-[38px] rounded-md grid place-items-center text-[11px] tabular-nums ${v == null || (m !== 'cpql' && !v) ? 'text-muted/40' : 'font-semibold'}" style="${paint(v)}" title="${esc(r.name)} · ${fmtDay(d)}\nXarajat ${usd(c?.spend || 0)} · Lid ${num(c?.leads || 0)} · Sifatli ${num(c?.qual || 0)} · Sotuv ${num(c?.won || 0)}">${v == null || (m !== 'cpql' && !v) ? '·' : show(v)}</div></td>`; }).join('')}
+    <td class="px-2 text-right text-[12.5px] font-bold tabular-nums">${show(m === 'cpql' ? (r.t.qual ? r.t.spend / r.t.qual : r.t.spend ? Infinity : 0) : r.t[m])}</td><td class="px-2 text-right text-[12px] tabular-nums">${r.t.qual ? chip(usd(r.t.spend / r.t.qual), r.t.spend / r.t.qual <= avgCpql ? 'success' : 'danger') : r.t.spend ? chip("sifatli yo'q", 'danger') : '—'}</td></tr>`;
+  return card(`<div class="flex flex-wrap items-start justify-between gap-3 mb-3"><div><h3 class="font-semibold text-[15px]">Kampaniyalar: kunlik nazorat</h3><p class="text-[11.5px] text-muted">Har katak — kampaniyaning o'sha kundagi natijasi. Yashil — yaxshi, qizil — qimmat. Lid va sifatli — lid kelgan kun, sotuv — tepadagi sana tanlovi bo'yicha. Katak ustiga olib boring — to'liq raqamlar.</p></div>${segBtn(CD_METRICS, m, "S.cdM='$';render()")}</div>
+    <div class="overflow-x-auto -mx-1"><table class="w-full border-separate border-spacing-0">${head}${rows.slice(0, LIMIT).map(line).join('')}</table></div>
+    ${rows.length > 15 ? `<button onclick="S.cdAll=!S.cdAll;render()" class="mt-3 h-9 px-4 rounded-xl bg-surface2 text-sm font-semibold">${S.cdAll ? 'Kamroq' : `Hammasi (${rows.length})`}</button>` : ''}
+    ${m === 'cpql' && avgCpql ? `<p class="text-[11px] text-muted mt-2">O'rtacha CPQL ${usd(avgCpql)}: yashil — 20% arzonroq, sariq — atrofida, qizil — 20% qimmatroq yoki pul ketgan, sifatli yo'q (∞).</p>` : ''}`);
+}
+
+// ---------- One ad: the creative itself and its numbers day by day ----------
+async function openAd(id) {
+  const req = S.adView = { id, media: null, err: null };
+  render();
+  try {
+    const { data } = await sbc.auth.getSession();
+    const res = await fetch(`${SB_URL}/functions/v1/ad-media?id=${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${data.session?.access_token}`, apikey: SB_KEY } });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || res.status);
+    req.media = body;
+  } catch (e) { req.err = e.message; }
+  if (S.adView === req) render();
+}
+function adPanel() {
+  const v = S.adView; if (!v) return '';
+  const a = adCat()[v.id] || {}, usd = n => adMoney(n, false), ids = new Set([v.id]);
+  const o = adAgg('ad', ids).rows[0] || { spend: 0, leads: 0, qual: 0, won: 0, revenue: 0, mleads: 0 }, M = adM(o);
+  const per = adDays(ids, () => 'x').x || {}, days = rangeDays().filter(d => per[d]).reverse();
+  const media = v.err ? `<div class="h-full grid place-items-center text-sm text-danger p-6 text-center">${esc(v.err)}</div>`
+    : !v.media ? `<div class="h-full grid place-items-center text-sm text-muted"><div class="text-center"><i class="ph-bold ph-spinner-gap animate-spin text-2xl"></i><div class="mt-2">Meta'dan yuklanmoqda…</div></div></div>`
+    : v.media.type === 'video' ? `<video src="${esc(v.media.src)}" ${v.media.poster ? `poster="${esc(v.media.poster)}"` : ''} controls autoplay playsinline class="w-full h-full object-contain bg-black rounded-xl"></video>`
+    : v.media.type === 'iframe' ? `<iframe src="${esc(v.media.src)}" class="w-full h-full rounded-xl bg-white" style="border:0" scrolling="yes" allow="autoplay; encrypted-media"></iframe>`
+    : `<img src="${esc(v.media.src)}" referrerpolicy="no-referrer" class="w-full h-full object-contain rounded-xl bg-surface2">`;
+  const tile = (l, val, sub = '') => `<div class="rounded-xl bg-surface2 p-3"><div class="text-[11px] text-muted">${l}</div><div class="text-[18px] font-bold tabular-nums mt-0.5">${val}</div>${sub ? `<div class="text-[10.5px] text-muted">${sub}</div>` : ''}</div>`;
+  return `<div class="fixed inset-0 z-40 bg-black/60" onclick="S.adView=null;render()"></div>
+    <div class="fixed z-50 inset-2 sm:inset-6 lg:inset-x-[8%] lg:inset-y-8 bg-surface rounded-2xl border border-line shadow-card flex flex-col overflow-hidden">
+      <div class="p-4 border-b border-line flex items-start justify-between gap-3"><div class="min-w-0"><div class="font-semibold text-[15px] truncate">${esc(a.name || v.id)}</div><div class="text-[11.5px] text-muted truncate">${esc([a.campaign, a.adset].filter(Boolean).join(' · '))} · ${a.status === 'ACTIVE' ? '<span style="color:rgb(var(--c-green))">● Faol</span>' : "○ To'xtagan"} · ${shortRange(S.from, S.to)}</div></div><button onclick="S.adView=null;render()" class="h-9 w-9 shrink-0 rounded-lg bg-surface2" aria-label="Yopish"><i class="ph-bold ph-x"></i></button></div>
+      <div class="flex-1 min-h-0 flex flex-col md:flex-row">
+        <div class="md:w-[400px] h-[420px] md:h-auto shrink-0 p-4 md:border-r border-line">${media}</div>
+        <div class="flex-1 min-w-0 overflow-y-auto p-4">
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-4">${tile('Xarajat', usd(o.spend))}${tile('Lid (Bitrix)', num(o.leads), `Meta: ${num(o.mleads)}`)}${tile('Sifatli', num(o.qual), `${pct(div(o.qual, o.leads))} · CPQL ${usd(M.cpql)}`)}${tile('Sotuv', num(o.won), o.won ? `sotuv narxi ${usd(M.cps)}` : '')}</div>
+          <div class="text-[13px] font-semibold mb-2">Kunlar bo'yicha</div>
+          ${days.length ? table([{ t: 'Kun', f: d => fmtDay(d) }, { t: 'Xarajat', r: 1, f: d => usd(per[d].spend) }, { t: 'Lid', r: 1, f: d => num(per[d].leads) }, { t: 'Sifatli', r: 1, f: d => num(per[d].qual) }, { t: 'CPQL', r: 1, f: d => per[d].qual ? usd(per[d].spend / per[d].qual) : '—' }, { t: 'Sotuv', r: 1, f: d => num(per[d].won) }], days, null, null, true) : empty("Bu davrda shu e'londa natija yo'q")}
+        </div>
+      </div>
+    </div>`;
 }
 
 // ---------- Funnel of one campaign / ad set / ad ----------
@@ -2289,7 +2365,7 @@ async function removeCompanyAdmin(user_id) {
 }
 
 const VIEWS = { companies: companiesPage, purchases: salesAll, report: reportPage, integr: integrPage, mapping: mappingPage, geo: geoPage, economy: economyPage, tasks: tasksPage, overview, funnel, daily: dailyAll, leads, creatives, pains, managers: teamAll, speed: speedPage, branches: branchesPage, status: statusPage, guide: guidePage, briefs, ai, settings, users: usersPage };
-function render() { $('app').innerHTML = drillPanel() + shell(S.data.funnel && !S.loading ? VIEWS[S.page]() : card(empty(S.data.funnel ? `${fmtDay(S.from)} — ${fmtDay(S.to)} uchun ma'lumot yuklanmoqda…` : 'Yuklanmoqda…'))); }
+function render() { $('app').innerHTML = drillPanel() + adPanel() + shell(S.data.funnel && !S.loading ? VIEWS[S.page]() : card(empty(S.data.funnel ? `${fmtDay(S.from)} — ${fmtDay(S.to)} uchun ma'lumot yuklanmoqda…` : 'Yuklanmoqda…'))); }
 // Starts the Meta / Bitrix / call syncs now (sync-now waits up to ~55 s), then reloads the data.
 async function syncNow() {
   S.syncing = true; render();
