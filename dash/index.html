@@ -78,6 +78,30 @@ const note = sub => String(sub).replace(/<[^>]+>/g, '').length > 90 ? `<p class=
 const empty = t => `<div class="text-sm text-muted py-8 text-center">${t}</div>`;
 // Sort value: explicit c.s, else the first number in the rendered cell, else its text.
 const cellVal = (c, r) => { if (c.s) return c.s(r); const t = String(c.f(r)).replace(/<[^>]+>/g, ' ').trim(); const m = t.replace(/(\d) (?=\d)/g, '$1').match(/-?\d+(\.\d+)?/); return m ? +m[0] : t; };
+// Tables built by hand get the same sorting: click a column title — big to small, again — small to big.
+// Total rows (Jami / O'rtacha) stay at the bottom; the choice is remembered per table.
+function domSortTables() {
+  S.domSort ||= {};
+  for (const tb of document.querySelectorAll('#app table:not([data-own-sort])')) {
+    const rows = [...tb.rows], hi = rows.findIndex(r => r.querySelector('th'));
+    if (hi < 0) continue;
+    const ths = [...rows[hi].cells];
+    if (ths.some(c => c.colSpan > 1)) continue;
+    const body = rows.slice(hi + 1).filter(r => !r.closest('tfoot') && !r.querySelector('th') && r.cells.length === ths.length);
+    if (body.length < 2 || body.some(r => r.parentNode !== body[0].parentNode)) continue;
+    const id = ths.map(t => t.textContent.trim()).join('|'), st = S.domSort[id];
+    const isTotal = r => /^(Jami|O'rtacha|Hammasi)/i.test(r.cells[0].textContent.trim());
+    ths.forEach((th, i) => {
+      th.style.cursor = 'pointer'; th.title = 'Bosing — kattadan kichikka, yana bosing — kichikdan kattaga';
+      th.insertAdjacentHTML('beforeend', st && st.i === i ? `<span class="text-accent"> ${st.dir < 0 ? '↓' : '↑'}</span>` : '<span class="opacity-30 text-[10px]"> ⇅</span>');
+      th.onclick = () => { const cur = S.domSort[id]; S.domSort[id] = { i, dir: cur && cur.i === i ? -cur.dir : -1 }; render(); };
+    });
+    if (!st) continue;
+    const val = r => { const t = (r.cells[st.i]?.textContent || '').trim(); if (t === '∞') return Infinity; const m = t.replace(/(\d)[\s\u00a0](?=\d)/g, '$1').match(/-?\d+(\.\d+)?/); return m ? +m[0] : /^[—·-]?$/.test(t) ? null : t.toLowerCase(); };
+    const data = body.filter(r => !isTotal(r)).sort((a, b) => { const x = val(a), y = val(b); if (x == null) return y == null ? 0 : 1; if (y == null) return -1; return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y))) * st.dir; });
+    for (const r of [...data, ...body.filter(isTotal)]) r.parentNode.appendChild(r);
+  }
+}
 function setSort(key, i) { const cur = S.sort[key]; S.sort[key] = { i, dir: cur && cur.i === i ? -cur.dir : -1 }; render(); }
 // Long lists show one page at a time, so a screen never turns into an endless scroll.
 const PAGE_SIZE = 20;
@@ -102,8 +126,8 @@ const table = (cols, rows, foot, limit, dense) => {
   if (limit) rows = rows.slice(0, limit);
   let nav = '';
   if (!limit && rows.length > PAGE_SIZE) { const pg = paged(key, rows); rows = pg.items; nav = pg.nav; }
-  const arrow = i => st && st.i === i ? (st.dir < 0 ? ' ↓' : ' ↑') : '';
-  return rows.length ? `<div class="overflow-x-auto -mx-4 sm:-mx-5"><table class="w-full text-sm"><thead><tr class="text-left text-xs text-muted border-b border-line">${cols.map((c, i) => `<th onclick="setSort('${esc(key).replace(/'/g, "\\'")}',${i})" title="Saralash" class="px-4 sm:px-5 py-2 font-semibold cursor-pointer select-none hover:text-fg ${c.r ? 'text-right' : ''}">${c.t}${arrow(i)}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr class="border-b border-line/60 last:border-0">${cols.map(c => `<td class="px-4 sm:px-5 ${dense ? 'py-1 text-[13px]' : 'py-2.5'} ${c.r ? 'text-right tabular-nums' : ''}">${c.f(r)}</td>`).join('')}</tr>`).join('')}</tbody>${foot ? `<tfoot><tr class="border-t-2 border-line font-semibold bg-surface2/50">${cols.map(c => `<td class="px-4 sm:px-5 py-2.5 ${c.r ? 'text-right tabular-nums' : ''}">${c.f(foot)}</td>`).join('')}</tr></tfoot>` : ''}</table></div>${nav}` : empty("Ma'lumot yo'q");
+  const arrow = i => st && st.i === i ? `<span class="text-accent"> ${st.dir < 0 ? '↓' : '↑'}</span>` : '<span class="opacity-30 text-[10px]"> ⇅</span>';
+  return rows.length ? `<div class="overflow-x-auto -mx-4 sm:-mx-5"><table data-own-sort class="w-full text-sm"><thead><tr class="text-left text-xs text-muted border-b border-line">${cols.map((c, i) => `<th onclick="setSort('${esc(key).replace(/'/g, "\\'")}',${i})" title="Bosing — kattadan kichikka, yana bosing — kichikdan kattaga" class="px-4 sm:px-5 py-2 font-semibold cursor-pointer select-none hover:text-fg ${c.r ? 'text-right' : ''}">${c.t}${arrow(i)}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr class="border-b border-line/60 last:border-0">${cols.map(c => `<td class="px-4 sm:px-5 ${dense ? 'py-1 text-[13px]' : 'py-2.5'} ${c.r ? 'text-right tabular-nums' : ''}">${c.f(r)}</td>`).join('')}</tr>`).join('')}</tbody>${foot ? `<tfoot><tr class="border-t-2 border-line font-semibold bg-surface2/50">${cols.map(c => `<td class="px-4 sm:px-5 py-2.5 ${c.r ? 'text-right tabular-nums' : ''}">${c.f(foot)}</td>`).join('')}</tr></tfoot>` : ''}</table></div>${nav}` : empty("Ma'lumot yo'q");
 };
 // Inline data bar (like BI dashboards): coloured bar scaled to the column max + the number.
 const bar = (v, max, color, label = num(v)) => `<div class="flex items-center gap-2 min-w-[120px]"><div class="flex-1 h-2 rounded-full bg-surface2 overflow-hidden"><div class="h-2 rounded-full" style="width:${max ? Math.max(v / max * 100, v ? 3 : 0).toFixed(1) : 0}%;background:rgb(var(--c-${color}))"></div></div><span class="text-[13px] tabular-nums font-semibold min-w-[2.5rem] text-right">${label}</span></div>`;
@@ -2117,6 +2141,7 @@ function adDays(ids, keyOf) {
   return by;
 }
 const CD_METRICS = [['qual', 'Sifatli lid'], ['won', 'Sotuv'], ['cpql', 'Sifatli lid narxi'], ['leads', 'Lid'], ['spend', 'Xarajat']];
+function cdSortBy(k) { const c = S.cdSort; S.cdSort = { k, dir: c && c.k === k ? -c.dir : -1 }; render(); }
 function campaignDaily() {
   const cat = adCat(), m = S.cdM || 'qual', usd = n => adMoney(n, false), F = S.cdF ||= { q: '', st: 'all', g: 'auto' };
   // Long periods are shown by week or month, otherwise the columns do not fit and most of them are empty.
@@ -2141,6 +2166,7 @@ function campaignDaily() {
   const days = [...new Set(allDays.map(bucket))].filter(b => rows.some(r => r.d[b]));
   if (!rows.length) return card(h3('Kampaniyalar: kunlik nazorat') + filters + empty(nAll ? "Filtrga mos kampaniya yo'q" : "Tanlangan davrda reklama ma'lumoti yo'q"));
   rows.sort((a, b) => b.t.qual - a.t.qual || b.t.won - a.t.won || b.t.spend - a.t.spend);
+  const cpqlOf = t => t.qual ? t.spend / t.qual : t.spend ? Infinity : null;
   const all = sum(Object.fromEntries(rows.map(r => [r.name, r.t]))), avgCpql = div(all.spend, all.qual);
   const val = c => !c ? null : m === 'cpql' ? (c.spend > 0 ? (c.qual ? c.spend / c.qual : Infinity) : null) : c[m] || 0;
   const mx = Math.max(1, ...rows.flatMap(r => days.map(d => (m === 'cpql' ? 0 : val(r.d[d]) || 0))));
@@ -2151,13 +2177,17 @@ function campaignDaily() {
     if (m === 'spend') return `background:rgb(var(--c-blue) / ${(0.08 + 0.5 * v / mx).toFixed(2)})`;
     return `background:rgb(var(--success) / ${(0.1 + 0.55 * v / mx).toFixed(2)})`;
   };
+  const so = S.cdSort, sv = r => !so ? 0 : so.k === 'name' ? r.name.toLowerCase() : so.k === 'tot' ? (m === 'cpql' ? cpqlOf(r.t) : r.t[m]) : so.k === 'cpql' ? cpqlOf(r.t) : val(r.d[so.k]);
+  if (so) rows = [...rows].sort((a, b) => { const x = sv(a), y = sv(b); if (x == null || (m !== 'cpql' && so.k !== 'name' && so.k !== 'tot' && so.k !== 'cpql' && !x)) return 1; if (y == null || (m !== 'cpql' && so.k !== 'name' && so.k !== 'tot' && so.k !== 'cpql' && !y)) return -1; return (typeof x === 'string' ? x.localeCompare(y) : x === y ? 0 : x > y ? 1 : -1) * so.dir; });
+  const sth = k => `onclick="cdSortBy('${k}')" title="Bosing — kattadan kichikka, yana bosing — kichikdan kattaga" style="cursor:pointer"`;
+  const sar = k => so && so.k === k ? `<span class="text-accent">${so.dir < 0 ? '↓' : '↑'}</span>` : '<span class="opacity-30 text-[9px]">⇅</span>';
   const LIMIT = S.cdAll ? rows.length : 15, today = iso(new Date());
-  const head = `<tr><th class="sticky left-0 z-10 bg-surface text-left font-semibold text-muted text-[11px] px-2 py-2 min-w-[200px]">Kampaniya</th>${days.map(d => `<th class="text-[10.5px] font-semibold px-1 py-2 text-center whitespace-nowrap ${d === bucket(today) ? 'text-accent' : 'text-muted'}">${g === 'month' ? MON[+d.slice(5, 7) - 1] : +d.slice(8)}<div class="font-normal">${g === 'month' ? d.slice(0, 4) : MON[+d.slice(5, 7) - 1] + (g === 'week' ? ' hafta' : '')}</div></th>`).join('')}<th class="text-[11px] font-semibold text-muted px-2 py-2 text-right">Jami</th><th class="text-[11px] font-semibold text-muted px-2 py-2 text-right">CPQL</th></tr>`;
+  const head = `<tr><th ${sth('name')} class="sticky left-0 z-10 bg-surface text-left font-semibold text-muted text-[11px] px-2 py-2 min-w-[200px]">Kampaniya ${sar('name')}</th>${days.map(d => `<th ${sth(d)} class="text-[10.5px] font-semibold px-1 py-2 text-center whitespace-nowrap ${d === bucket(today) ? 'text-accent' : 'text-muted'}">${g === 'month' ? MON[+d.slice(5, 7) - 1] : +d.slice(8)}<div class="font-normal">${g === 'month' ? d.slice(0, 4) : MON[+d.slice(5, 7) - 1] + (g === 'week' ? ' hafta' : '')} ${sar(d)}</div></th>`).join('')}<th ${sth('tot')} class="text-[11px] font-semibold text-muted px-2 py-2 text-right whitespace-nowrap">Jami ${sar('tot')}</th><th ${sth('cpql')} class="text-[11px] font-semibold text-muted px-2 py-2 text-right whitespace-nowrap">CPQL ${sar('cpql')}</th></tr>`;
   const line = r => `<tr class="border-t border-line/60"><td class="sticky left-0 z-10 bg-surface px-2 py-1.5"><button data-k="${esc(r.name)}" onclick="adWithin('campaign', this.dataset.k)" class="block text-left text-[12.5px] font-semibold truncate max-w-[240px] hover:text-accent" title="${esc(r.name)} — bosing, ichidagi kreativlar">${esc(r.name)}</button><div class="text-[10.5px] text-muted">${usd(r.t.spend)} · ${num(r.t.leads)} lid · ${num(r.t.qual)} sifatli · ${num(r.t.won)} sotuv</div></td>${days.map(d => { const c = r.d[d], v = val(c);
       return `<td class="px-0.5 py-1"><div class="h-8 ${g === 'day' ? 'min-w-[38px]' : 'min-w-[56px]'} rounded-md grid place-items-center text-[11px] tabular-nums ${v == null || (m !== 'cpql' && !v) ? 'text-muted/40' : 'font-semibold'}" style="${paint(v)}" title="${esc(r.name)} · ${g === 'month' ? MON[+d.slice(5, 7) - 1] + ' ' + d.slice(0, 4) : g === 'week' ? fmtDay(d) + ' haftasi' : fmtDay(d)}\nXarajat ${usd(c?.spend || 0)} · Lid ${num(c?.leads || 0)} · Sifatli ${num(c?.qual || 0)} · Sotuv ${num(c?.won || 0)}">${v == null || (m !== 'cpql' && !v) ? '·' : show(v)}</div></td>`; }).join('')}
-    <td class="px-2 text-right text-[12.5px] font-bold tabular-nums">${show(m === 'cpql' ? (r.t.qual ? r.t.spend / r.t.qual : r.t.spend ? Infinity : 0) : r.t[m])}</td><td class="px-2 text-right text-[12px] tabular-nums">${r.t.qual ? chip(usd(r.t.spend / r.t.qual), r.t.spend / r.t.qual <= avgCpql ? 'success' : 'danger') : r.t.spend ? chip("sifatli yo'q", 'danger') : '—'}</td></tr>`;
+    <td class="px-2 text-right text-[12.5px] font-bold tabular-nums">${show(m === 'cpql' ? (r.t.qual ? r.t.spend / r.t.qual : r.t.spend ? Infinity : 0) : r.t[m])}</td><td class="px-2 text-right text-[12px] tabular-nums">${!r.t.spend ? '<span class="text-muted" title="Bu davr uchun Meta xarajati yo\'q">—</span>' : r.t.qual ? chip(usd(r.t.spend / r.t.qual), r.t.spend / r.t.qual <= avgCpql ? 'success' : 'danger') : chip("sifatli yo'q", 'danger')}</td></tr>`;
   return card(`<div class="flex flex-wrap items-start justify-between gap-3 mb-3"><div><h3 class="font-semibold text-[15px]">Kampaniyalar: kunlik nazorat</h3>${note("Kampaniya nomini bosing — ichidagi kreativlar. Har katak — kampaniyaning o'sha kundagi natijasi. Yashil — yaxshi, qizil — qimmat. Lid va sifatli — lid kelgan kun, sotuv — tepadagi sana tanlovi bo'yicha. Katak ustiga olib boring — to'liq raqamlar.")}</div>${segBtn(CD_METRICS, m, "S.cdM='$';render()")}</div>${filters}
-    <div id="cdScroll" class="overflow-x-auto -mx-1"><table class="w-full border-separate border-spacing-0">${head}${rows.slice(0, LIMIT).map(line).join('')}</table></div>
+    <div id="cdScroll" class="overflow-x-auto -mx-1"><table data-own-sort class="w-full border-separate border-spacing-0">${head}${rows.slice(0, LIMIT).map(line).join('')}</table></div>
     ${rows.length > 15 ? `<button onclick="S.cdAll=!S.cdAll;render()" class="mt-3 h-9 px-4 rounded-xl bg-surface2 text-sm font-semibold">${S.cdAll ? 'Kamroq' : `Hammasi (${rows.length})`}</button>` : ''}
     ${m === 'cpql' && avgCpql ? `<p class="text-[11px] text-muted mt-2">O'rtacha CPQL ${usd(avgCpql)}: yashil — 20% arzonroq, sariq — atrofida, qizil — 20% qimmatroq yoki pul ketgan, sifatli yo'q (∞).</p>` : ''}`);
 }
@@ -2385,7 +2415,7 @@ async function removeCompanyAdmin(user_id) {
 }
 
 const VIEWS = { companies: companiesPage, purchases: salesAll, report: reportPage, integr: integrPage, mapping: mappingPage, overview, funnel, daily: dailyAll, leads, creatives: adsAll, managers: teamAll, branches: branchesPage, status: statusPage, guide: guidePage, ai, settings, users: usersPage };
-function render() { renderNow(); const cd = document.getElementById('cdScroll'); if (cd) cd.scrollLeft = cd.scrollWidth; } // newest days in view
+function render() { renderNow(); domSortTables(); const cd = document.getElementById('cdScroll'); if (cd) cd.scrollLeft = cd.scrollWidth; } // newest days in view
 function renderNow() { $('app').innerHTML = drillPanel() + adPanel() + shell(S.data.funnel && !S.loading ? VIEWS[S.page]() : card(empty(S.data.funnel ? `${fmtDay(S.from)} — ${fmtDay(S.to)} uchun ma'lumot yuklanmoqda…` : 'Yuklanmoqda…'))); }
 // Starts the Meta / Bitrix / call syncs now (sync-now waits up to ~55 s), then reloads the data.
 async function syncNow() {
