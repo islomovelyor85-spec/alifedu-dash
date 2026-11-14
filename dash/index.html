@@ -244,13 +244,13 @@ async function load() {
   const wk = new Date(S.from + 'T00:00'); wk.setDate(wk.getDate() - (wk.getDay() + 6) % 7); const weekFrom = iso(wk);
   const [funnel, courses, cohort, creatives, naming, pains, taxonomy, objections, managers, briefs, cfg, sync, outcomes, sales, users, dealStages, hours, codes, daily, operators, statusOut, cycle, money, lostReasons, cohortSum, cohortSrc, spend, adDaily, adLeads, adCatalog, wonDaily, salesMonth, calls, speed, dm, dmLive, queue, brDaily, brSpend, brCamp, plans, adGeo, economy, tasks, staff, capi, crmMap, crmStatuses] = await Promise.all([
     q('v_funnel', x => x.eq('level', 'course_branch').gte('week', weekFrom).lte('week', S.to)),
-    q('course_settings'), q('v_cohort'), q('v_creative_score'),
+    q('course_settings'), q('cache_cohort'), q('cache_creative_score'),
     Promise.all(['campaigns', 'adsets', 'ads'].map(t => q(t, x => x.eq('naming_error', true)).then(r => r.map(o => ({ ...o, kind: t }))))).then(a => a.flat()),
     q('v_pain_conversion'), q('pain_taxonomy'), q('v_objections'), q('v_managers'),
     Promise.resolve([]), q('audit_settings').then(r => r[0] || {}), q('sync_state'),
     q('v_lead_outcomes', day), q('v_sales_funnel', day),
     q('crm_statuses', x => x.eq('entity', 'USER')).then(r => Object.fromEntries(r.map(u => [u.status_id, u.name]))),
-    q('v_deal_stages', day), q('v_lead_hours', day), q('v_lead_codes', day), q('v_daily_outcomes', day), q('v_operator_outcomes', day), q('v_status_outcomes', day), q('v_sales_cycle', day), q('v_deal_money', day), q('v_deal_lost_reasons', day), q('v_cohort_summary'), q('v_cohort_src'), q('v_spend_daily', day),
+    q('v_deal_stages', day), q('v_lead_hours', day), q('v_lead_codes', day), q('v_daily_outcomes', day), q('v_operator_outcomes', day), q('v_status_outcomes', day), q('v_sales_cycle', day), q('v_deal_money', day), q('v_deal_lost_reasons', day), q('cache_cohort_summary'), q('cache_cohort_src'), q('v_spend_daily', day),
     q('ad_daily', x => x.gte('date', S.from).lte('date', S.to)), q('v_ad_leads', day), q('v_ad_catalog'), q('v_won_daily', day), q('v_sales_by_month', x => x.gte('sale_month', '2026-07-01')),
     Promise.resolve([]),
     q('v_speed_to_lead', day), q('daily_metrics', x => x.order('day', { ascending: false })),
@@ -262,7 +262,7 @@ async function load() {
   const D = { funnel, courses, cohort, creatives, naming, pains, taxonomy, objections, managers, briefs, cfg, sync, outcomes, sales, users, dealStages, hours, codes, daily, operators, statusOut, cycle, money, lostReasons, cohortSum, cohortSrc, spend, adDaily, adLeads, adCatalog, wonDaily, salesMonth, calls, speed, dm, dmLive, queue, brDaily, brSpend, brCamp, plans, adGeo, economy, tasks, staff, capi, crmMap, crmStatuses };
   const srcName = Object.fromEntries(crmStatuses.filter(r => r.entity === 'SOURCE').map(r => [r.status_id, r.name]));
   const pr = prevRange(), pday = x => x.gte('day', pr.from).lte('day', pr.to);
-  const [prevDaily, prevSpend, forecast, prevBr] = await Promise.all([q('v_daily_outcomes', pday), q('v_spend_daily', pday), q('v_deal_forecast'), q('v_branch_daily', pday)]);
+  const [prevDaily, prevSpend, forecast, prevBr] = await Promise.all([q('v_daily_outcomes', pday), q('v_spend_daily', pday), q('cache_deal_forecast'), q('v_branch_daily', pday)]);
   Object.assign(D, { prevDaily, prevSpend, forecast, prevBr });
   D.purchases = await purchasesP;
   D.me = ADMIN ? { email: (await sbc.auth.getUser()).data.user?.email } : null;
