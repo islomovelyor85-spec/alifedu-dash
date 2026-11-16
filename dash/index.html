@@ -1853,7 +1853,7 @@ function planEditor() {
   const bdSum = k => Object.values(bd).reduce((a, x) => a + +(x[k] || 0), 0);
   // Groups calculator (like the team's sheet): groups → students → visits → qualified → leads → budget, and per day.
   const C = calcPlan(p), wd = +p.work_days || 27, money = v => '$' + v.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const calcRows = C.rows.map(r => ({ ...r, ...(br[r.b] || { tl: 0, tq: 0, sold: brSold[r.b]?.n || 0 }) }));
+  const calcRows = C.rows.map(r => ({ ...(br[r.b] || { tl: 0, tq: 0, sold: brSold[r.b]?.n || 0 }), ...r }));
   const pIn = (id, l, v, suffix, step = '1') => `<label class="block"><span class="block text-[11px] font-semibold mb-1 text-muted">${l}</span><div class="relative"><input id="${id}" type="number" min="0" step="${step}" value="${v}" onchange="planDraft()" class="w-full h-9 pl-2.5 pr-7 rounded-lg bg-surface2 border border-line text-sm"><span class="absolute right-2.5 top-2 text-xs text-muted">${suffix}</span></div></label>`;
   const nCell = v => `<span class="tabular-nums">${num(Math.round(v))}</span>`;
   const calcTable = table([
