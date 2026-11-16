@@ -1836,30 +1836,48 @@ function planEditor() {
     { t: 'Lead', r: 1, f: o => cell(o.leads, need.leads * o.s * sc), s: o => o.leads }, { t: 'Sifatli', r: 1, f: o => cell(o.qual, need.qual * o.s * sc), s: o => o.qual }, { t: 'Sotuv', r: 1, f: o => cell(o.sold, need.sales * o.s * sc), s: o => o.sold }], chanRows);
   // Branches
   const brSold = countBy(salesList(true), p => p.branch || "NOMA'LUM");
-  const br = {}; for (const r of d.brDaily) { const o = br[r.branch] ??= { b: r.branch, leads: 0, qual: 0, sold: brSold[r.branch]?.n || 0 }; o.leads += +r.leads; o.qual += +r.qual; }
-  const brList = Object.values(br).filter(o => o.b && !/^(Aniqlanmagan|Boshqa|NOMA)/i.test(o.b)).sort((a, b) => b.leads - a.leads);
+  const br = {}, bd = p.branch_daily || {}, getBr = b => br[b] ??= { b, leads: 0, qual: 0, tl: 0, tq: 0, sold: brSold[b]?.n || 0 };
+  for (const r of d.brDaily) { const o = getBr(r.branch); o.leads += +r.leads; o.qual += +r.qual; if (channelOf(r.source) === 'Target') { o.tl += +r.leads; o.tq += +r.qual; } }
+  for (const b of Object.keys(bd)) getBr(b);
+  const brList = Object.values(br).filter(o => o.b && !/^(Aniqlanmagan|Boshqa|NOMA)/i.test(o.b)).sort((a, b) => (BR_ORDER.indexOf(a.b) + 1 || 99) - (BR_ORDER.indexOf(b.b) + 1 || 99) || b.leads - a.leads);
+  const daysIn = Math.round(sc * dim), dIn = (b, k) => +(bd[b]?.[k] ?? 0);
+  const numIn = (attr, b, v) => `<input ${attr}="${esc(b)}" type="number" min="0" step="1" value="${v || ''}" placeholder="0" class="w-16 h-8 px-2 rounded-lg bg-surface2 border border-line text-right">`;
   const brShare = b => (+(p.branches?.[b] ?? 0)) / 100, brSum = brList.reduce((a, o) => a + +(p.branches?.[o.b] ?? 0), 0);
   const brTable = table([{ t: 'Filial', f: o => `<span class="font-semibold">${esc(o.b)}</span>`, s: o => o.b },
     { t: 'Ulush', r: 1, f: o => `<input data-br="${esc(o.b)}" type="number" min="0" max="100" value="${+(p.branches?.[o.b] ?? 0)}" class="w-16 h-8 px-2 rounded-lg bg-surface2 border border-line text-right">%`, s: o => brShare(o.b) },
-    { t: 'Lead', r: 1, f: o => cell(o.leads, need.leads * brShare(o.b) * sc), s: o => o.leads }, { t: 'Sifatli', r: 1, f: o => cell(o.qual, need.qual * brShare(o.b) * sc), s: o => o.qual }, { t: 'Sotuv', r: 1, f: o => cell(o.sold, need.sales * brShare(o.b) * sc), s: o => o.sold }], brList);
+    { t: 'Target lid / kun', r: 1, f: o => numIn('data-bl', o.b, dIn(o.b, 'leads')), s: o => dIn(o.b, 'leads') },
+    { t: 'Sifatli / kun', r: 1, f: o => numIn('data-bq', o.b, dIn(o.b, 'qual')), s: o => dIn(o.b, 'qual') },
+    { t: 'Target lid', r: 1, f: o => cell(o.tl, dIn(o.b, 'leads') * (scale ? daysIn : dim)), s: o => o.tl },
+    { t: 'Target sifatli', r: 1, f: o => cell(o.tq, dIn(o.b, 'qual') * (scale ? daysIn : dim)), s: o => o.tq },
+    { t: 'Sotuv', r: 1, f: o => cell(o.sold, need.sales * brShare(o.b) * sc), s: o => o.sold }], brList);
+  const bdSum = k => Object.values(bd).reduce((a, x) => a + +(x[k] || 0), 0);
   const chSum = names.reduce((a, c) => a + +(p.channels?.[c] ?? 0), 0);
   const saveBtn = `<button class="h-11 px-6 rounded-xl bg-fg text-surface text-sm font-semibold">Rejani saqlash</button>`;
   const factNote = scale ? `Fakt / reja — tanlangan kunlar uchun (oy rejasi × ${Math.round(scale * dim)}/${dim}).` : "Bu oy tanlangan davrga kirmaydi — faqat oylik reja ko'rsatiladi.";
   const tab = S.planTab || 'set';
   const body = tab === 'ch' ? `<form onsubmit="savePlan(event)">${card(h3('Kanallar', `Ulushlar jami ${chSum}%${chSum === 100 ? '' : " — 100% bo'lishi kerak"}. ${factNote}`) + chanTable, 'mb-4')}${saveBtn}</form>`
-    : tab === 'br' ? `<form onsubmit="savePlan(event)">${card(h3('Filiallar', `Ulushlar jami ${brSum}%${brSum === 100 ? '' : " — 100% bo'lishi kerak"}. ${factNote}`) + brTable, 'mb-4')}${saveBtn}</form>`
+    : tab === 'br' ? `<form onsubmit="savePlan(event)">${card(h3('Filiallar', `Kunlik Target reja: ${num(bdSum('leads'))} lid, ${num(bdSum('qual'))} sifatli lid kuniga (oyiga ${num(bdSum('leads') * dim)} / ${num(bdSum('qual') * dim)}). Ulushlar jami ${brSum}%${brSum === 100 ? '' : " — 100% bo'lishi kerak"}; ulush sotuv rejasini bo'ladi. ${factNote} Har kunlik plan/fakt — «Kunlar → Plan / Fakt».`) + brTable, 'mb-4')}${saveBtn}</form>`
     : `<form onsubmit="savePlan(event)">${card(h3(`${MONTH_FULL[m - 1]} ${y} rejasi`, saved ? "O'zgartirib «Rejani saqlash»ni bosing." : "Bu oy uchun reja hali kiritilmagan.") + `<div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
       ${pctInput('plSales', 'Sotuv rejasi', p.sales, 'ta', '1')}${pctInput('plLQ', 'Lead → sifatli', fmtP(p.lead_qual))}${pctInput('plQC', 'Sifatli → filialga keldi', fmtP(p.qual_came))}${pctInput('plCS', 'Filialga keldi → sotuv', fmtP(p.came_sale))}${pctInput('plCpl', 'Target lead narxi', p.cpl, '$', '0.01')}</div>
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm"><div class="rounded-xl bg-surface2 p-3"><div class="text-xs text-muted">Kerakli lead</div><b class="tabular-nums">${num(need.leads)}</b> <span class="text-xs text-muted">kuniga ${num(need.leads / dim)}</span></div><div class="rounded-xl bg-surface2 p-3"><div class="text-xs text-muted">Kerakli sifatli</div><b class="tabular-nums">${num(need.qual)}</b></div><div class="rounded-xl bg-surface2 p-3"><div class="text-xs text-muted">Filialga kelishi kerak</div><b class="tabular-nums">${num(need.came)}</b></div><div class="rounded-xl bg-surface2 p-3"><div class="text-xs text-muted">Reklama byudjeti</div><b class="tabular-nums">${adMoney(need.budget, false)}</b></div></div>`, 'mb-4')}${saveBtn}</form>`;
   return `<div class="flex flex-wrap items-center gap-3 mb-4">${picker}${segBtn([['set', 'Umumiy reja'], ['ch', 'Kanallar'], ['br', 'Filiallar']], tab, "S.planTab='$';render()")}</div>` + body;
 }
+// Daily Target plan per branch from the «Filiallar» tab inputs (left as it was when the tab is not open).
+function pickDaily(cur) {
+  const L = [...document.querySelectorAll('input[data-bl]')], Q = [...document.querySelectorAll('input[data-bq]')];
+  if (!L.length) return cur;
+  const out = {};
+  for (const i of L) { const v = +i.value || 0; if (v) (out[i.dataset.bl] ??= {}).leads = v; }
+  for (const i of Q) { const v = +i.value || 0; if (v) (out[i.dataset.bq] ??= {}).qual = v; }
+  return out;
+}
 async function savePlan(e) {
   e.preventDefault();
-  const month = planMonthKey(), old = S.data.plans.find(x => x.month === month) || { sales: 0, lead_qual: 0.2, qual_came: 0.3, came_sale: 0.8, cpl: 3, channels: {}, branches: {} };
+  const month = planMonthKey(), old = S.data.plans.find(x => x.month === month) || { sales: 0, lead_qual: 0.2, qual_came: 0.3, came_sale: 0.8, cpl: 3, channels: {}, branches: {}, branch_daily: {} };
   const num0 = (id, f, cur) => $(id) ? f(+$(id).value || 0) : cur;
   const pick = (attr, cur) => { const inputs = [...document.querySelectorAll(`input[${attr}]`)]; return inputs.length ? Object.fromEntries(inputs.map(i => [i.getAttribute(attr), +i.value || 0]).filter(x => x[1] > 0)) : cur; };
   const pct100 = v => v / 100, same = v => v;
-  const row = { month, sales: num0('plSales', same, old.sales), lead_qual: num0('plLQ', pct100, old.lead_qual), qual_came: num0('plQC', pct100, old.qual_came), came_sale: num0('plCS', pct100, old.came_sale), cpl: num0('plCpl', same, old.cpl), channels: pick('data-ch', old.channels), branches: pick('data-br', old.branches), updated_at: new Date().toISOString() };
+  const row = { month, sales: num0('plSales', same, old.sales), lead_qual: num0('plLQ', pct100, old.lead_qual), qual_came: num0('plQC', pct100, old.qual_came), came_sale: num0('plCS', pct100, old.came_sale), cpl: num0('plCpl', same, old.cpl), channels: pick('data-ch', old.channels), branches: pick('data-br', old.branches), branch_daily: pickDaily(old.branch_daily || {}), updated_at: new Date().toISOString() };
   const { error } = await sbc.from('plan_months').upsert(row);
   if (error) return alert(error.message);
   S.data.plans = [...S.data.plans.filter(x => x.month !== row.month), row]; render();
@@ -2308,7 +2326,36 @@ function reportPage() {
 
 const salesAll = () => merged('m_sales', [['list', 'Sotuvlar', 'ph-receipt', purchasesPage], ['economy', 'Iqtisodiyot', 'ph-coins', economyPage], ['when', "Sotuv qachon bo'ladi", 'ph-hourglass-medium', cohort], ['money', "To'lovlar", 'ph-wallet', moneyPage]]);
 const adsAll = () => merged('m_ads', [['ads', 'Kreativlar', 'ph-film-strip', creatives], ['geo', 'Lokatsiya isrofi', 'ph-map-pin', geoPage]]);
-const dailyAll = () => merged('m_daily', [['ch', 'Kunlar', 'ph-calendar-dots', daily], ['m', 'Kunlik metrikalar', 'ph-chart-bar', metricsPage]]);
+const dailyAll = () => merged('m_daily', [['ch', 'Kunlar', 'ph-calendar-dots', daily], ['pf', 'Plan / Fakt', 'ph-target', planFactDaily], ['m', 'Kunlik metrikalar', 'ph-chart-bar', metricsPage]]);
+
+// ---------- Daily plan / fact by branch (Target leads), laid out like the team's sheet ----------
+// Plan: «Reja → Filiallar» daily numbers of the month. Fact: Target leads (and qualified) by the day the lead came.
+const BR_ORDER = ['XADRA', 'ANDIJON', "FARG'ONA", 'NAMANGAN', 'URGANCH', 'NAVOIY', 'TERMIZ', 'NUKUS', 'QARSHI', 'SAMARQAND', 'ANDIJON (YANGI BOZOR)', 'SIRDARYO', "NOMA'LUM", 'CHIMBOY'];
+const brLabel = b => /^NOMA/.test(b) ? 'Aniqlanmagan' : b === 'XADRA' ? 'Xadra' : b;
+function planFactDaily() {
+  const d = S.data, m = S.pfM || 'leads', days = rangeDays().filter(x => x <= iso(new Date()));
+  const planOf = day => d.plans.find(x => x.month === day.slice(0, 7) + '-01')?.branch_daily || {};
+  const fact = {};
+  for (const r of d.brDaily) if (channelOf(r.source) === 'Target') { const c = ((fact[r.day] ??= {})[r.branch || "NOMA'LUM"] ??= { leads: 0, qual: 0 }); c.leads += +r.leads; c.qual += +r.qual; }
+  const seen = new Set([...days.flatMap(x => Object.keys(planOf(x))), ...Object.values(fact).flatMap(Object.keys)]);
+  const brs = [...BR_ORDER.filter(b => seen.has(b)), ...[...seen].filter(b => !BR_ORDER.includes(b)).sort()];
+  if (!brs.length) return card(h3('Plan / Fakt') + empty("Reja kiritilmagan va Target lidlari yo'q"));
+  const pl = (day, b) => planOf(day)[b]?.[m], fa = (day, b) => fact[day]?.[b]?.[m] || 0;
+  const tone = r => r == null ? '' : r >= 0.9 ? 'success' : r >= 0.7 ? 'warn' : 'danger';
+  const pctCell = (f, p) => { const r = p ? f / p : null; return `<td class="px-1.5 py-1.5 text-right tabular-nums text-[11.5px] border-r border-line/60">${r == null ? '<span class="text-muted">—</span>' : `<span class="px-1.5 py-0.5 rounded-md font-semibold" style="color:rgb(var(--${tone(r)}));background:rgb(var(--${tone(r)}) / .12)">${pct(r, 0)}</span>`}</td>`; };
+  const trio = (f, p) => `<td class="px-1.5 py-1.5 text-right tabular-nums text-muted">${p == null ? '' : num(p)}</td><td class="px-1.5 py-1.5 text-right tabular-nums font-semibold">${num(f)}</td>${pctCell(f, p)}`;
+  const sumP = (list, b) => { let t = 0, any = false; for (const x of list) { const v = pl(x, b); if (v != null) { t += +v; any = true; } } return any ? t : null; };
+  const dayTot = x => { let f = 0, p = 0, any = false; for (const b of brs) { f += fa(x, b); const v = pl(x, b); if (v != null) { p += +v; any = true; } } return [f, any ? p : null]; };
+  const head1 = `<tr class="text-[11px] text-muted"><th rowspan="2" class="sticky left-0 z-10 bg-surface px-2 py-2 text-left border-b border-line">Sana</th><th colspan="3" class="px-2 py-1.5 text-center border-r border-line/60 text-fg">Jami</th>${brs.map(b => `<th colspan="3" class="px-2 py-1.5 text-center border-r border-line/60 whitespace-nowrap">${esc(brLabel(b))}</th>`).join('')}</tr>`;
+  const head2 = `<tr class="text-[10.5px] text-muted border-b border-line">${[0, ...brs].map(() => '<th class="px-1.5 pb-1.5 text-right font-normal">Plan</th><th class="px-1.5 pb-1.5 text-right font-normal">Fakt</th><th class="px-1.5 pb-1.5 text-right font-normal border-r border-line/60">Foiz</th>').join('')}</tr>`;
+  const rows = [...days].reverse().map(x => { const [f, p] = dayTot(x); return `<tr class="border-b border-line/50 hover:bg-surface2/40"><td class="sticky left-0 z-10 bg-surface px-2 py-1.5 whitespace-nowrap font-semibold">${fmtDay(x)}</td>${trio(f, p)}${brs.map(b => trio(fa(x, b), pl(x, b))).join('')}</tr>`; }).join('');
+  const T = days.reduce((a, x) => { const [f, p] = dayTot(x); a.f += f; if (p != null) { a.p += p; a.any = true; } return a; }, { f: 0, p: 0, any: false });
+  const foot = `<tr class="border-t-2 border-line font-semibold bg-surface2/50"><td class="sticky left-0 z-10 bg-surface2 px-2 py-2">Jami</td>${trio(T.f, T.any ? T.p : null)}${brs.map(b => trio(days.reduce((a, x) => a + fa(x, b), 0), sumP(days, b))).join('')}</tr>`;
+  const anyPlan = days.some(x => Object.keys(planOf(x)).length);
+  return card(`<div class="flex flex-wrap items-start justify-between gap-3 mb-3"><div><h3 class="font-semibold text-[15px]">Plan / Fakt: filiallar bo'yicha har kun</h3>${note("Fakt — Target kanalidan kelgan lidlar (sifatli — hozir sifatli statusidagilar), lid kelgan kun bo'yicha. Plan — «Umumiy → Reja → Filiallar»dagi kunlik reja. Foiz: yashil 90%+, sariq 70–90%, qizil 70% dan past. Bugungi kun hali tugamagan.")}</div>${segBtn([['leads', 'Lid'], ['qual', 'Sifatli lid']], m, "S.pfM='$';render()")}</div>
+    ${anyPlan ? '' : `<div class="mb-3 rounded-xl border border-warn/40 bg-warn/10 p-3 text-[12.5px]">Bu oy uchun kunlik filial rejasi kiritilmagan. <button onclick="goPage('plan');S.planTab='br';render()" class="font-semibold text-accent">Rejani kiritish →</button></div>`}
+    <div class="overflow-x-auto -mx-4 sm:-mx-5"><table data-own-sort class="w-full text-[12.5px] border-separate border-spacing-0"><thead>${head1}${head2}</thead><tbody>${rows}</tbody><tfoot>${foot}</tfoot></table></div>`);
+}
 const teamAll = () => merged('m_team', [['m', 'Menejerlar', 'ph-users', managers], ['c', "Qo'ng'iroqlar", 'ph-phone', calls], ['speed', 'Aloqa tezligi', 'ph-timer', speedPage], ['pains', "Og'riqlar", 'ph-chat-circle-dots', pains]]);
 // ---------- Companies (super admin): who uses the platform and how each one is connected ----------
 const companyName = () => (S.companies || []).find(c => c.id === S.company)?.name || '';
