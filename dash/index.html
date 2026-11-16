@@ -1778,7 +1778,7 @@ const pctInput = (id, l, v, suffix = '%', step = '0.1') => `<label class="block"
 const fmtP = v => +(v * 100).toFixed(1);
 function planNeed(p) {
   const came = div(p.sales, +p.came_sale) || 0, qual = div(came, +p.qual_came) || 0, leads = div(qual, +p.lead_qual) || 0;
-  const tShare = +(p.channels?.Target ?? 100) / 100, tLeads = leads * tShare;
+  const tShare = Object.keys(p.branch_groups || {}).length ? 1 : +(p.channels?.Target ?? 100) / 100, tLeads = leads * tShare;
   return { sales: +p.sales, came, qual, leads, tLeads, budget: tLeads * +p.cpl, cplan: tLeads ? +p.cpl : null };
 }
 // Ads worth acting on in the selected period, from Meta spend and Bitrix quality.
@@ -1817,7 +1817,7 @@ function planCauses(p, t, sold, need, scale) {
 const planMonthKey = () => (S.planMonth || S.to.slice(0, 7)) + '-01';
 function planEditor() {
   const d = S.data, key = planMonthKey(), month = key.slice(0, 7), saved = d.plans.find(x => x.month === key);
-  const p = saved || { month: key, sales: 0, lead_qual: 0.2, qual_came: 0.3, came_sale: 0.8, cpl: 3, channels: {}, branches: {} };
+  const p = { ...(saved || { month: key, sales: 0, lead_qual: 0.2, qual_came: 0.3, came_sale: 0.8, cpl: 3, channels: {}, branches: {}, per_group: 14, work_days: 27 }), ...(S.planDraft?.month === key ? S.planDraft : {}) };
   const need = planNeed(p), y = +month.slice(0, 4), m = +month.slice(5, 7), dim = new Date(y, m, 0).getDate();
   const inRange = planRange().months.find(x => x.key === key), scale = inRange ? inRange.scale : 0;
   const choices = []; for (let k = new Date(S.from.slice(0, 7) + '-01T00:00'), end = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1); k <= end || iso(k) <= S.to; k = new Date(k.getFullYear(), k.getMonth() + 1, 1)) choices.push(iso(k).slice(0, 7));
@@ -1851,18 +1851,62 @@ function planEditor() {
     { t: 'Target sifatli', r: 1, f: o => cell(o.tq, dIn(o.b, 'qual') * (scale ? daysIn : dim)), s: o => o.tq },
     { t: 'Sotuv', r: 1, f: o => cell(o.sold, need.sales * brShare(o.b) * sc), s: o => o.sold }], brList);
   const bdSum = k => Object.values(bd).reduce((a, x) => a + +(x[k] || 0), 0);
+  // Groups calculator (like the team's sheet): groups → students → visits → qualified → leads → budget, and per day.
+  const C = calcPlan(p), wd = +p.work_days || 27, money = v => '$' + v.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const calcRows = C.rows.map(r => ({ ...r, ...(br[r.b] || { tl: 0, tq: 0, sold: brSold[r.b]?.n || 0 }) }));
+  const pIn = (id, l, v, suffix, step = '1') => `<label class="block"><span class="block text-[11px] font-semibold mb-1 text-muted">${l}</span><div class="relative"><input id="${id}" type="number" min="0" step="${step}" value="${v}" onchange="planDraft()" class="w-full h-9 pl-2.5 pr-7 rounded-lg bg-surface2 border border-line text-sm"><span class="absolute right-2.5 top-2 text-xs text-muted">${suffix}</span></div></label>`;
+  const nCell = v => `<span class="tabular-nums">${num(Math.round(v))}</span>`;
+  const calcTable = table([
+    { t: 'Filial', f: o => o._foot ? '<b>Jami</b>' : `<span class="font-semibold">${esc(brLabel(o.b))}</span>`, s: o => o.b },
+    { t: 'Guruhlar', r: 1, f: o => o._foot ? `<b>${num(o.g)}</b>` : `<input data-bg="${esc(o.b)}" type="number" min="0" step="1" value="${o.g || ''}" placeholder="0" onchange="planDraft()" class="w-16 h-8 px-2 rounded-lg bg-surface2 border border-line text-right">`, s: o => o.g },
+    { t: "O'quvchi", r: 1, f: o => `<b class="tabular-nums">${num(o.st)}</b>`, s: o => o.st },
+    { t: 'Tashrif', r: 1, f: o => nCell(o.vis), s: o => o.vis }, { t: 'Lid', r: 1, f: o => nCell(o.lead), s: o => o.lead }, { t: 'Sifatli lid', r: 1, f: o => nCell(o.qual), s: o => o.qual },
+    { t: 'Kunlik sifatli', r: 1, f: o => nCell(o.dQual), s: o => o.dQual }, { t: 'Kunlik lid', r: 1, f: o => nCell(o.dLead), s: o => o.dLead },
+    { t: 'Kunlik tashrif', r: 1, f: o => nCell(o.dVis), s: o => o.dVis }, { t: 'Kunlik sotuv', r: 1, f: o => nCell(o.dSale), s: o => o.dSale },
+    { t: 'Kunlik sarf', r: 1, f: o => `<span class="tabular-nums">${money(o.dBudget)}</span>`, s: o => o.dBudget }, { t: 'Budjet', r: 1, f: o => `<b class="tabular-nums">${money(o.budget)}</b>`, s: o => o.budget },
+    { t: 'Fakt: Target lid', r: 1, f: o => cell(o.tl || 0, o.dLead * (scale ? daysIn : dim)), s: o => o.tl || 0 },
+    { t: 'Fakt: sotuv', r: 1, f: o => cell(o.sold || 0, o.st * sc), s: o => o.sold || 0 },
+  ], calcRows, { _foot: true, ...C.tot, tl: calcRows.reduce((a, o) => a + (o.tl || 0), 0), sold: calcRows.reduce((a, o) => a + (o.sold || 0), 0) });
+  const calcCard = card(h3('Filiallar rejasi: guruhlardan hisob', `Guruhlar sonini kiriting — qolgani o'zi hisoblanadi: o'quvchi = guruh × ${num(p.per_group || 14)}, tashrif = o'quvchi ÷ ${pct(+p.came_sale, 0)}, sifatli = tashrif ÷ ${pct(+p.qual_came, 0)}, lid = sifatli ÷ ${pct(+p.lead_qual, 0)}, budjet = lid × $${+p.cpl}, kunlik = ÷ ${wd} ish kuni. Bu Target rejasi; saqlanganda kunlik filial rejasi («Kunlar → Plan / Fakt») va umumiy sotuv rejasi shundan yangilanadi. ${factNote}`) +
+    `<div class="grid grid-cols-3 lg:grid-cols-6 gap-2.5 mb-4">${pIn('plPG', "O'quvchi / guruh", p.per_group ?? 14, 'ta')}${pIn('plCS', 'Tashrif → sotuv', fmtP(p.came_sale), '%', '0.1')}${pIn('plQC', 'Sifatli → tashrif', fmtP(p.qual_came), '%', '0.1')}${pIn('plLQ', 'Lid → sifatli', fmtP(p.lead_qual), '%', '0.1')}${pIn('plCpl', 'Lid narxi', p.cpl, '$', '0.01')}${pIn('plDays', 'Ish kunlari', wd, 'kun')}</div>` + calcTable, 'mb-4');
   const chSum = names.reduce((a, c) => a + +(p.channels?.[c] ?? 0), 0);
   const saveBtn = `<button class="h-11 px-6 rounded-xl bg-fg text-surface text-sm font-semibold">Rejani saqlash</button>`;
   const factNote = scale ? `Fakt / reja — tanlangan kunlar uchun (oy rejasi × ${Math.round(scale * dim)}/${dim}).` : "Bu oy tanlangan davrga kirmaydi — faqat oylik reja ko'rsatiladi.";
   const tab = S.planTab || 'set';
   const body = tab === 'ch' ? `<form onsubmit="savePlan(event)">${card(h3('Kanallar', `Ulushlar jami ${chSum}%${chSum === 100 ? '' : " — 100% bo'lishi kerak"}. ${factNote}`) + chanTable, 'mb-4')}${saveBtn}</form>`
-    : tab === 'br' ? `<form onsubmit="savePlan(event)">${card(h3('Filiallar', `Kunlik Target reja: ${num(bdSum('leads'))} lid, ${num(bdSum('qual'))} sifatli lid kuniga (oyiga ${num(bdSum('leads') * dim)} / ${num(bdSum('qual') * dim)}). Ulushlar jami ${brSum}%${brSum === 100 ? '' : " — 100% bo'lishi kerak"}; ulush sotuv rejasini bo'ladi. ${factNote} Har kunlik plan/fakt — «Kunlar → Plan / Fakt».`) + brTable, 'mb-4')}${saveBtn}</form>`
+    : tab === 'br' ? `<form onsubmit="savePlan(event)">${calcCard}${saveBtn}${S.planDraft?.month === key ? '<span class="ml-3 text-[12.5px] text-warn">Saqlanmagan o\'zgarishlar bor</span>' : ''}</form>`
+    : tab === 'brOld' ? `<form onsubmit="savePlan(event)">${card(h3('Filiallar', `Kunlik Target reja: ${num(bdSum('leads'))} lid, ${num(bdSum('qual'))} sifatli lid kuniga (oyiga ${num(bdSum('leads') * dim)} / ${num(bdSum('qual') * dim)}). Ulushlar jami ${brSum}%${brSum === 100 ? '' : " — 100% bo'lishi kerak"}; ulush sotuv rejasini bo'ladi. ${factNote} Har kunlik plan/fakt — «Kunlar → Plan / Fakt».`) + brTable, 'mb-4')}${saveBtn}</form>`
     : `<form onsubmit="savePlan(event)">${card(h3(`${MONTH_FULL[m - 1]} ${y} rejasi`, saved ? "O'zgartirib «Rejani saqlash»ni bosing." : "Bu oy uchun reja hali kiritilmagan.") + `<div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
       ${pctInput('plSales', 'Sotuv rejasi', p.sales, 'ta', '1')}${pctInput('plLQ', 'Lead → sifatli', fmtP(p.lead_qual))}${pctInput('plQC', 'Sifatli → filialga keldi', fmtP(p.qual_came))}${pctInput('plCS', 'Filialga keldi → sotuv', fmtP(p.came_sale))}${pctInput('plCpl', 'Target lead narxi', p.cpl, '$', '0.01')}</div>
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm"><div class="rounded-xl bg-surface2 p-3"><div class="text-xs text-muted">Kerakli lead</div><b class="tabular-nums">${num(need.leads)}</b> <span class="text-xs text-muted">kuniga ${num(need.leads / dim)}</span></div><div class="rounded-xl bg-surface2 p-3"><div class="text-xs text-muted">Kerakli sifatli</div><b class="tabular-nums">${num(need.qual)}</b></div><div class="rounded-xl bg-surface2 p-3"><div class="text-xs text-muted">Filialga kelishi kerak</div><b class="tabular-nums">${num(need.came)}</b></div><div class="rounded-xl bg-surface2 p-3"><div class="text-xs text-muted">Reklama byudjeti</div><b class="tabular-nums">${adMoney(need.budget, false)}</b></div></div>`, 'mb-4')}${saveBtn}</form>`;
   return `<div class="flex flex-wrap items-center gap-3 mb-4">${picker}${segBtn([['set', 'Umumiy reja'], ['ch', 'Kanallar'], ['br', 'Filiallar']], tab, "S.planTab='$';render()")}</div>` + body;
 }
 // Daily Target plan per branch from the «Filiallar» tab inputs (left as it was when the tab is not open).
+// The groups calculator: every number of the plan follows from groups per branch and four rates.
+function calcPlan(p) {
+  const pg = +p.per_group || 14, cs = +p.came_sale || 1, qc = +p.qual_came || 1, lq = +p.lead_qual || 1, cpl = +p.cpl || 0, wd = +p.work_days || 27, G = p.branch_groups || {};
+  const brs = [...BR_ORDER.filter(b => !/^NOMA/.test(b) && (G[b] != null || b !== 'ANDIJON (YANGI BOZOR)')), ...Object.keys(G).filter(b => !BR_ORDER.includes(b))];
+  const rows = brs.map(b => { const g = +G[b] || 0, st = g * pg, vis = st / cs, qual = vis / qc, lead = qual / lq, budget = lead * cpl;
+    return { b, g, st, vis, qual, lead, budget, dQual: qual / wd, dLead: lead / wd, dVis: vis / wd, dSale: st / wd, dBudget: budget / wd }; });
+  const tot = rows.reduce((t, r) => { for (const k of ['g', 'st', 'vis', 'qual', 'lead', 'budget', 'dQual', 'dLead', 'dVis', 'dSale', 'dBudget']) t[k] = (t[k] || 0) + r[k]; return t; }, {});
+  return { rows, tot };
+}
+// Typing in the calculator recomputes the table before saving.
+function planDraft() {
+  const v = id => $(id) ? +$(id).value || 0 : undefined, d = { month: planMonthKey() };
+  if ($('plPG')) Object.assign(d, { per_group: v('plPG'), came_sale: v('plCS') / 100, qual_came: v('plQC') / 100, lead_qual: v('plLQ') / 100, cpl: v('plCpl'), work_days: v('plDays') });
+  const G = [...document.querySelectorAll('input[data-bg]')];
+  if (G.length) d.branch_groups = Object.fromEntries(G.map(i => [i.dataset.bg, +i.value || 0]).filter(x => x[1] > 0));
+  S.planDraft = { ...(S.planDraft?.month === d.month ? S.planDraft : {}), ...d }; render();
+}
+// Whole-number shares that add up to 100 (largest remainder).
+function shares100(w) {
+  const tot = Object.values(w).reduce((a, x) => a + x, 0); if (!tot) return {};
+  const raw = Object.entries(w).map(([k, x]) => [k, x / tot * 100]), out = Object.fromEntries(raw.map(([k, x]) => [k, Math.floor(x)]));
+  let left = 100 - Object.values(out).reduce((a, x) => a + x, 0);
+  for (const [k] of [...raw].sort((a, b) => (b[1] % 1) - (a[1] % 1))) { if (left-- <= 0) break; out[k]++; }
+  return Object.fromEntries(Object.entries(out).filter(x => x[1] > 0));
+}
 function pickDaily(cur) {
   const L = [...document.querySelectorAll('input[data-bl]')], Q = [...document.querySelectorAll('input[data-bq]')];
   if (!L.length) return cur;
@@ -1877,10 +1921,20 @@ async function savePlan(e) {
   const num0 = (id, f, cur) => $(id) ? f(+$(id).value || 0) : cur;
   const pick = (attr, cur) => { const inputs = [...document.querySelectorAll(`input[${attr}]`)]; return inputs.length ? Object.fromEntries(inputs.map(i => [i.getAttribute(attr), +i.value || 0]).filter(x => x[1] > 0)) : cur; };
   const pct100 = v => v / 100, same = v => v;
-  const row = { month, sales: num0('plSales', same, old.sales), lead_qual: num0('plLQ', pct100, old.lead_qual), qual_came: num0('plQC', pct100, old.qual_came), came_sale: num0('plCS', pct100, old.came_sale), cpl: num0('plCpl', same, old.cpl), channels: pick('data-ch', old.channels), branches: pick('data-br', old.branches), branch_daily: pickDaily(old.branch_daily || {}), updated_at: new Date().toISOString() };
+  const row0 = { month, sales: num0('plSales', same, old.sales), lead_qual: num0('plLQ', pct100, old.lead_qual), qual_came: num0('plQC', pct100, old.qual_came), came_sale: num0('plCS', pct100, old.came_sale), cpl: num0('plCpl', same, old.cpl), channels: pick('data-ch', old.channels), branches: pick('data-br', old.branches), branch_daily: pickDaily(old.branch_daily || {}), updated_at: new Date().toISOString() };
+  const G = [...document.querySelectorAll('input[data-bg]')];
+  const row = G.length ? (() => {
+    const { company_id, ...base } = old;
+    const p = { ...base, ...row0, per_group: num0('plPG', same, old.per_group ?? 14), work_days: num0('plDays', same, old.work_days ?? 27), branch_groups: Object.fromEntries(G.map(i => [i.dataset.bg, +i.value || 0]).filter(x => x[1] > 0)) };
+    const C = calcPlan(p);
+    p.sales = Math.round(C.tot.st);
+    p.branch_daily = Object.fromEntries(C.rows.filter(r => r.g).map(r => [r.b, { leads: Math.round(r.dLead), qual: Math.round(r.dQual) }]));
+    p.branches = shares100(Object.fromEntries(C.rows.filter(r => r.g).map(r => [r.b, r.st])));
+    return p;
+  })() : row0;
   const { error } = await sbc.from('plan_months').upsert(row);
   if (error) return alert(error.message);
-  S.data.plans = [...S.data.plans.filter(x => x.month !== row.month), row]; render();
+  S.planDraft = null; S.data.plans = [...S.data.plans.filter(x => x.month !== row.month), row]; render();
 }
 
 // ---------- Money lost on leads from the wrong region ----------
