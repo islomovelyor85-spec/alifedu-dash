@@ -277,7 +277,7 @@ async function load() {
     q('v_deal_stages', day), q('v_lead_hours', day), q('v_lead_codes', day), q('v_daily_outcomes', day), q('v_operator_outcomes', day), q('v_status_outcomes', day), q('v_sales_cycle', day), q('v_deal_money', day), q('v_deal_lost_reasons', day), q('cache_cohort_summary'), q('cache_cohort_src'), q('v_spend_daily', day),
     q('ad_daily', x => x.gte('date', S.from).lte('date', S.to)), q('v_ad_leads', day), q('v_ad_catalog'), q('v_won_daily', day), q('v_sales_by_month', x => x.gte('sale_month', '2026-07-01')),
     Promise.resolve([]),
-    q('v_speed_to_lead', day), q('daily_metrics', x => x.order('day', { ascending: false })),
+    q('v_speed_to_lead', x => x.eq('day', iso(new Date()))), q('daily_metrics', x => x.order('day', { ascending: false })),
     q('v_daily_metrics', x => x.gte('day', iso(addDays(new Date(), -1)))), queueStats(),
     q('v_branch_daily', day), q('v_branch_spend_daily', day), q('v_branch_campaign', day),
     q('plan_months'), q('v_ad_geo', day), q('v_month_economy', x => x.order('month', { ascending: false })),
@@ -1689,9 +1689,18 @@ function guidePage() {
 
 // ---- Speed to lead: minutes from lead creation to the first call (any direction, answered or not).
 const tkTime = t => t ? new Date(t).toLocaleString('sv-SE', { timeZone: 'Asia/Tashkent' }).slice(5, 16) : '—';
+// Speed rows for the chosen dates are heavy (one row per lead), so they load only when this tab is opened.
+async function loadSpeed() {
+  const key = S.from + '|' + S.to; if (S.speedBusy === key) return;
+  S.speedBusy = key;
+  const rows = await q('v_speed_to_lead', x => x.gte('day', S.from).lte('day', S.to));
+  if (S.speedBusy !== key) return;
+  S.speedBusy = null; S.data.speedAll = rows; S.data.speedKey = key; render();
+}
 function speedPage() {
+  if (S.data.speedKey !== S.from + '|' + S.to) { loadSpeed(); return card(empty("Aloqa tezligi yuklanmoqda…")); }
   // minutes = wait in working hours only (09:00–20:00, DB biz_minutes): nights are skipped; raw = clock time since the lead arrived.
-  const all = bySource(S.data.speed || []).map(r => ({ ...r, raw: r.minutes, minutes: r.work_minutes ?? r.minutes }));
+  const all = bySource(S.data.speedAll || []).map(r => ({ ...r, raw: r.minutes, minutes: r.work_minutes ?? r.minutes }));
   if (!all.length) return card(empty("Hali ma'lumot yo'q: qo'ng'iroqlar tarixi yuklanmoqda (bir necha daqiqa)."));
   const called = all.filter(r => r.minutes != null), notCalled = all.filter(r => r.first_call_at == null);
   const med = xs => { const a = xs.map(Number).sort((x, y) => x - y); return a.length ? (a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2) : null; };
