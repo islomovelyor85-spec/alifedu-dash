@@ -459,19 +459,20 @@ function overviewKpi() {
   const kpi = (l, v, plan, fmt, dl, line, c, pg) => { const r = plan ? div(typeof v === 'number' ? v : 0, plan) : null, neutral = c === 'amber';
     return `<div ${pg ? `onclick="goPage('${pg}')" title="Batafsil"` : ''} class="${BOX} !p-4 flex flex-col gap-1.5 min-w-0 ${pg ? 'cursor-pointer hover:ring-1 hover:ring-accent/40 transition' : ''}"><div class="flex items-center justify-between gap-2"><span class="text-[12px] text-muted font-medium">${l}</span><span class="w-2 h-2 rounded-full" style="background:rgb(var(--c-${c}))"></span></div>
       <div class="flex items-end justify-between gap-2"><span class="num-xl text-[26px] font-bold tabular-nums leading-none whitespace-nowrap">${fmt(v)}</span><div class="w-[78px] h-8 shrink-0">${line}</div></div>
-      ${plan ? `<div class="flex items-center gap-2 text-[11px]"><div class="flex-1 h-1.5 rounded-full bg-surface2 overflow-hidden"><div class="h-full rounded-full" style="width:${Math.min(r * 100, 100).toFixed(1)}%;background:rgb(var(--${neutral ? (r > 1.1 ? 'danger' : 'warn') : r >= 0.9 ? 'success' : r >= 0.7 ? 'warn' : 'danger'}))"></div></div><span class="tabular-nums text-muted">${Math.round(r * 100)}% / ${fmt(plan)}</span></div>` : '<div class="text-[11px] text-muted">plan yo\'q</div>'}
+      ${plan ? `<div class="flex items-center gap-2 text-[11px]"><div class="flex-1 h-1.5 rounded-full bg-surface2 overflow-hidden"><div class="h-full rounded-full" style="width:${Math.min(r * 100, 100).toFixed(1)}%;background:rgb(var(--${neutral ? (r > 1.1 ? 'danger' : 'warn') : r >= 0.9 ? 'success' : r >= 0.7 ? 'warn' : 'danger'}))"></div></div><span class="tabular-nums text-muted">${Math.round(r * 100)}% / ${fmt(plan)}</span></div>` : ''}
       <div class="text-[11px]">${dl}</div></div>`; };
   const cq = div(spend, T.qual), pcq = pSpend == null ? null : div(pSpend, PT.qual), cac = div(spend, tSales.length), pcac = pSpend == null ? null : div(pSpend, pTSales.length);
   const romi = fx && spend ? div(tSales.reduce((a, p) => a + (+p.amount || 0), 0) - spend * fx, spend * fx) : null;
+  const tLeadD = by(tRows(d.brDaily), r => +r.leads), cpl = div(spend, T.leads), pcpl = pSpend == null ? null : div(pSpend, PT.leads);
   const kpis = `<div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 mb-3">
-    ${kpi('Sotuvlar', sold, R.sales * share, num, delta(sold, pSales.length, false, num), spark(days.map(x => saleD[x] || 0), 'green'), 'green', 'purchases')}
+    ${kpi('Lid narxi (CPL)', cpl, 0, usd, (pcpl == null ? '<span class="text-muted">Target</span>' : delta(cpl, pcpl, true, usd)) + (R.p ? ` <span class="text-muted">· plan ${usd(+R.p.cpl)}</span>` : ''), spark(rolling(days, spendD, tLeadD), 'teal'), 'teal', 'creatives')}
     ${kpi('Tushum (1-oy)', rev, 0, somMoney, delta(rev, pSales.reduce((a, p) => a + (+p.amount || 0), 0), false, somMoney), spark(days.map(x => revD[x] || 0), 'green'), 'teal', 'economy')}
     ${kpi('Reklama xarajati', spend, targetOn ? R.budget * (S.brF ? share : 1) : 0, usd, pSpend == null ? '<span class="text-muted">—</span>' : delta(spend, pSpend, false, usd), spark(days.map(x => spendD[x] || 0), 'amber'), 'amber', 'creatives')}
     ${kpi('Sifatli lid narxi', cq, 0, usd, pcq == null ? '<span class="text-muted">Target</span>' : delta(cq, pcq, true, usd), spark(rolling(days, spendD, tQualD), 'blue'), 'blue', 'daily')}
     ${kpi('Mijoz narxi (CAC)', cac, 0, usd, (pcac == null ? '' : delta(cac, pcac, true, usd)) + ` <span class="text-muted">· ROMI ${pct(romi)}</span>`, spark(rolling(days, spendD, tSaleD, 14), 'violet'), 'violet', 'economy')}
   </div>`;
   // Conclusions come right after the funnel: first where leads are lost, then what it means and what to do.
-  return ovFilters() + kpis
+  return ovFilters() + funnelPlan(F, PF, sold, pSales.length, R, share) + kpis
     + stepFunnel(F, PF, R) + insights({ t: { ...F, came_to_branch: F.came }, T, pT: PT, sold, spend, pSpend: pSpend ?? 0, R, tSales, pTSales }) + compareCard(F, PF) + channelsCard(R) + `<div class="grid md:grid-cols-3 gap-3 mb-6">${branchRank()}${creativeRank()}${managerBoard(sales).replace(/xl:col-span-3 md:col-span-3/, '')}</div>` + forecastCard();
 }
 const moreLink = pg => `<button onclick="event.stopPropagation();goPage('${pg}')" class="text-[11.5px] font-semibold text-accent whitespace-nowrap">Batafsil →</button>`;
@@ -526,6 +527,35 @@ function drillPanel() {
       <div class="flex-1 overflow-y-auto p-4">${body}</div></div>`;
 }
 // Step-by-step funnel: how many pass, how many drop at each step, and why they drop.
+// Funnel against plan: four stages in one row, conversion between them, each against its plan.
+// Lead, contacted and qualified are leads that came in these days; sales follow the top date switch.
+function funnelPlan(F, PF, sold, pSold, R, share) {
+  const p = R.p, sh = R.has ? share : 0;
+  const st = [
+    { l: 'Lid', v: F.leads, pv: PF.leads, plan: R.leads * sh, i: 0, c: 'blue' },
+    { l: 'Aloqa qilindi', v: F.contacted, pv: PF.contacted, plan: 0, i: 1, c: 'violet' },
+    { l: 'Sifatli lid', v: F.qual, pv: PF.qual, plan: R.qual * sh, i: 2, c: 'teal' },
+    { l: 'Sotuv', v: sold, pv: pSold, plan: R.sales * sh, i: 4, c: 'green' },
+  ];
+  // arrows: lead → contacted, lead → qualified (the plan sets this one), qualified → sale
+  const arrows = [
+    { conv: div(F.contacted, F.leads), plan: null, label: 'aloqa', lost: F.leads - F.contacted, li: 1 },
+    { conv: div(F.qual, F.leads), plan: p ? +p.lead_qual : null, label: 'liddan sifatli', lost: F.contacted - F.qual, li: 2 },
+    { conv: div(sold, F.qual), plan: p ? +p.qual_came * +p.came_sale : null, label: 'sifatlidan sotuv', lost: null },
+  ];
+  const tone = (v, plan) => v == null || !plan ? 'muted' : v >= plan * 0.95 ? 'success' : v >= plan * 0.7 ? 'warn' : 'danger';
+  const card = o => { const r = o.plan ? o.v / o.plan : null, t = tone(o.v, o.plan);
+    return `<div onclick="openDrill('step', ${o.i})" title="Bosing — shu bosqichdagi leadlar" class="flex-1 min-w-[150px] rounded-2xl bg-surface2/70 border border-line/40 p-4 cursor-pointer hover:ring-1 hover:ring-accent/40 transition">
+      <div class="flex items-center justify-between gap-2"><span class="text-[12.5px] font-medium text-muted"><span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:rgb(var(--c-${o.c}))"></span>${o.l}</span>${r != null ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full tabular-nums" style="color:rgb(var(--${t}));background:rgb(var(--${t}) / .12)">${Math.round(r * 100)}%</span>` : ''}</div>
+      <div class="mt-1.5 flex items-baseline gap-2 flex-wrap"><span class="num-xl text-[30px] font-bold tabular-nums leading-none">${num(o.v)}</span>${o.plan ? `<span class="text-[12px] text-muted tabular-nums">plan ${num(o.plan)}</span>` : o.i === 1 ? `<span class="text-[12px] text-muted tabular-nums">${pct(div(o.v, F.leads))} liddan</span>` : ''}</div>
+      <div class="h-1.5 rounded-full bg-surface mt-3 overflow-hidden">${o.plan ? `<div class="h-full rounded-full" style="width:${Math.min(r * 100, 100).toFixed(1)}%;background:rgb(var(--${t}))"></div>` : `<div class="h-full rounded-full" style="width:${Math.min((div(o.v, F.leads) || 0) * 100, 100).toFixed(1)}%;background:rgb(var(--c-${o.c}) / .7)"></div>`}</div>
+      <div class="text-[11px] mt-2">${delta(o.v, o.pv, false, num)}</div></div>`; };
+  const arrow = a => { const t = tone(a.conv, a.plan);
+    return `<div class="shrink-0 w-[86px] flex flex-col items-center justify-center text-center gap-0.5 py-2"><i class="ph-bold ph-arrow-right text-muted text-base"></i><b class="text-[15px] tabular-nums" style="color:rgb(var(--${a.plan ? t : 'fg'}))">${pct(a.conv)}</b><span class="text-[10.5px] text-muted leading-tight">${a.plan ? 'plan ' + pct(a.plan) : a.label}</span>${a.lost > 0 ? `<button onclick="openDrill('lost_step', ${a.li})" title="Bosing — yo'qolgan leadlar" class="text-[10.5px] font-semibold mt-0.5 underline decoration-dotted underline-offset-2" style="color:rgb(var(--danger))">−${num(a.lost)}</button>` : ''}</div>`; };
+  const planNote = R.has ? `Tanlangan ${prevRange().days} kunlik plan${S.source || S.brF ? ' · ' + esc([S.source, S.brF].filter(Boolean).join(' · ')) : ''}` : `<button onclick="goPage('plan')" class="text-accent font-semibold">Plan kiritilmagan — kiritish →</button>`;
+  return `<div class="${BOX} mb-3"><div class="flex flex-wrap items-center justify-between gap-2 mb-3"><h3 class="font-semibold text-[15px]">Voronka va plan</h3><span class="text-[11.5px] text-muted">${planNote}</span></div>
+    <div class="flex items-stretch overflow-x-auto pb-1">${card(st[0])}${arrow(arrows[0])}${card(st[1])}${arrow(arrows[1])}${card(st[2])}${arrow(arrows[2])}${card(st[3])}</div></div>`;
+}
 function stepFunnel(F, PF, R) {
   const p = R.p, st = [['Lid', F.leads, PF.leads], ["Aloqa qilindi", F.contacted, PF.contacted], ['Sifatli', F.qual, PF.qual], ['Filialga keldi', F.came, PF.came], ['Sotuvga aylandi', F.won, PF.won]];
   const planConv = [null, null, p && +p.lead_qual, p && +p.qual_came, p && +p.came_sale];
@@ -540,9 +570,8 @@ function stepFunnel(F, PF, R) {
   const lr = {}; for (const r of S.data.lostReasons || []) lr[r.reason || "Sabab yozilmagan"] = (lr[r.reason || "Sabab yozilmagan"] || 0) + +r.deals;
   const reasonList = (o, color, kind) => { const e = Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, 6), tot = Object.values(o).reduce((a, b) => a + b, 0) || 1, mx = e[0]?.[1] || 1;
     return e.map(([k, n]) => `<div data-k="${esc(k)}" onclick="openDrill('${kind}', this.dataset.k)" title="Bosing — ro'yxat ochiladi" class="py-1.5 px-1.5 -mx-1.5 rounded-lg cursor-pointer hover:bg-surface2"><div class="flex justify-between gap-2 text-[12.5px]"><span class="truncate">${esc(k)}</span><span class="tabular-nums whitespace-nowrap"><b>${num(n)}</b> <span class="text-muted text-[11px]">${pct(n / tot, 0)}</span></span></div><div class="h-1.5 rounded-full bg-surface2 mt-1"><div class="h-1.5 rounded-full" style="width:${(n / mx * 100).toFixed(0)}%;background:rgb(var(--c-${color}))"></div></div></div>`).join('') || empty("Ma'lumot yo'q"); };
-  return `<div class="${BOX} mb-3"><div class="flex flex-wrap items-center justify-between gap-2 mb-3"><div><h3 class="font-semibold text-[15px]">Voronka: qayerda yo'qotyapmiz</h3><p class="text-[11.5px] text-muted">Shu davrda kelgan leadlar yo'li. Ustunni bossangiz — o'sha leadlar, «yo'qoldi»ni bossangiz — yo'qolganlari ochiladi. Rang: yashil — plandan yaxshi, qizil — yomon. «Oldin» — oldingi ${prevRange().days} kun.</p></div>${S.source || S.brF ? `<span class="text-[11.5px] px-2.5 py-1 rounded-full bg-surface2">${esc([S.source, S.brF].filter(Boolean).join(' · '))}</span>` : ''}</div>
-    <div class="flex gap-3 overflow-x-auto pb-1">${cols}</div>
-    <div class="grid md:grid-cols-2 gap-4 mt-5 pt-4 border-t border-line/60"><div><div class="text-[13px] font-semibold mb-1">Nega lid sifatli bo'lmadi</div><div class="text-[11px] text-muted mb-1">Lead statusi bo'yicha${S.brF ? ' (barcha filiallar)' : ''} · bosing — leadlar ochiladi</div>${reasonList(stBy, 'rose', 'status')}</div>
+  return `<div class="${BOX} mb-3">
+    <div class="grid md:grid-cols-2 gap-4"><div><div class="text-[13px] font-semibold mb-1">Nega lid sifatli bo'lmadi</div><div class="text-[11px] text-muted mb-1">Lead statusi bo'yicha${S.brF ? ' (barcha filiallar)' : ''} · bosing — leadlar ochiladi</div>${reasonList(stBy, 'rose', 'status')}</div>
       <div><div class="text-[13px] font-semibold mb-1">Nega deal sotuvga aylanmadi</div><div class="text-[11px] text-muted mb-1">Yopilgan deal sababi (barcha kanallar) · bosing — deallar ochiladi</div>${reasonList(lr, 'amber', 'lost')}</div></div></div>`;
 }
 // Compare: this period vs the previous one, or channels / branches side by side.
